@@ -1,17 +1,66 @@
 """Day 11: Docker 沙箱测试。
 
 标记为 integration，本地无 Docker 时跳过。
+
+跳过条件（任一命中即 skip）：
+- 不是 Linux/macOS（Windows runner 拉不到 linux 镜像）
+- 没装 docker CLI
+- docker daemon 不响应
 """
+
+from __future__ import annotations
+
+import platform
+import shutil
 
 import pytest
 
 from sandbox.docker_backend import DockerSandbox
 
+
+# ============================================================
+# 环境检测
+# ============================================================
+
+def _docker_usable() -> bool:
+    """检查当前环境是否可以跑本测试。
+
+    三个条件：
+    1. 不是 Windows（windows runner 默认跑 Windows 容器，拉不到 linux 镜像）
+    2. docker CLI 存在
+    3. docker daemon 能 ping 通
+    """
+    # 条件 1：Windows 直接跳过
+    if platform.system() == "Windows":
+        return False
+
+    # 条件 2：docker CLI 存在
+    if shutil.which("docker") is None:
+        return False
+
+    # 条件 3：daemon 响应
+    try:
+        import docker
+
+        client = docker.from_env()
+        client.ping()
+        return True
+    except Exception:
+        return False
+
+
 pytestmark = pytest.mark.skipif(
-    not __import__("shutil").which("docker"),
-    reason="Docker 不可用",
+    not _docker_usable(),
+    reason=(
+        "需要 Linux Docker daemon。"
+        "Windows runner / 无 Docker 环境 / daemon 未启动时跳过。"
+    ),
 )
 
+
+# ============================================================
+# Fixtures
+# ============================================================
 
 @pytest.fixture
 def sandbox(tmp_path):
@@ -21,6 +70,10 @@ def sandbox(tmp_path):
     yield sb
     sb.stop()
 
+
+# ============================================================
+# 测试
+# ============================================================
 
 def test_exec_simple(sandbox):
     result = sandbox.exec("echo hello")
