@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  # Agent 主进程
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: coding-agent
+    environment:
+      - AGENT_MODEL=${AGENT_MODEL:-openai:qwen3.8-max-0902}
+      - AGENT_WORKSPACE=/workspace
+      - AGENT_MODEL_WINDOW=${AGENT_MODEL_WINDOW:-200000}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-coding-agent}
+      - POSTGRES_DSN=postgresql://agent:agent@postgres:5432/agent
+    volumes:
+      # 挂载工作区（被操作的项目）
+      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      # 挂载 Docker socket（用于启动沙箱容器）
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 持久化索引和记忆
+      - agent_index:/workspace/.code_index
+      - agent_memory:/workspace/.agent_memory
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  # 长期记忆存储
+  postgres:
+    image: postgres:16-alpine
+    container_name: coding-agent-postgres
+    environment:
+      - POSTGRES_USER=agent
+      - POSTGRES_PASSWORD=agent
+      - POSTGRES_DB=agent
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  # 可选：LangSmith 自建版
+  # langsmith:
+  #   image: langchain/langsmith:latest
+  #   ...
+
+volumes:
+  pgdata:
+  agent_index:
+  agent_memory:
+
+networks:
+  agent-net:
+    driver: bridge

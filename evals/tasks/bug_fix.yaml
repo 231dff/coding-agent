@@ -1,0 +1,43 @@
+category: bug_fix
+tasks:
+  - id: fix_off_by_one
+    description: "sum_list 函数有 off-by-one 错误，最后一个元素没被加进去。请修复并运行测试验证。"
+    setup:
+      calc.py: |
+        def sum_list(xs):
+            total = 0
+            for i in range(len(xs) - 1):
+                total += xs[i]
+            return total
+      tests/test_calc.py: |
+        from calc import sum_list
+
+        def test_sum_empty():
+            assert sum_list([]) == 0
+
+        def test_sum_single():
+            assert sum_list([5]) == 5
+
+        def test_sum_multi():
+            assert sum_list([1, 2, 3]) == 6
+    success_assert: |
+      _test_result = (ws / ".last_test").read_text() if (ws / ".last_test").exists() else ""
+      "PASSED" in _test_result or "passed" in _test_result
+    expected_tools: [read_file, edit_file, run_tests]
+    token_budget: 10000
+
+  - id: fix_import_cycle
+    description: "a.py 和 b.py 存在循环依赖，请重构以消除循环。"
+    setup:
+      a.py: |
+        from b import helper_b
+        def helper_a():
+            return helper_b() + 1
+      b.py: |
+        from a import helper_a
+        def helper_b():
+            return 1
+    success_assert: |
+      "import" not in (ws / "b.py").read_text() or "from a" not in (ws / "b.py").read_text()
+    expected_tools: [find_circular_deps, read_file, edit_file]
+    token_budget: 12000

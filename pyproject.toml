@@ -1,0 +1,332 @@
+[project]
+name = "coding-agent"
+version = "0.1.0"
+description = "Coding Agent — 对任意项目进行代码理解、修改与测试"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "you@example.com" },
+]
+keywords = ["agent", "llm", "langchain", "coding", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+]
+
+dependencies = [
+    # ============================================================
+    # 核心框架
+    # ============================================================
+    "langchain>=1.0,<2.0",
+    "langchain-core>=0.3",
+    "langgraph>=0.3",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "python-dotenv>=1.0",
+
+    # ============================================================
+    # 模型 Provider
+    # ============================================================
+    "langchain-openai>=1.0",
+    "langchain-anthropic>=1.0",
+    "openai>=1.50",
+    "anthropic>=0.40",
+
+    # ============================================================
+    # 代码库理解
+    # ============================================================
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+    "networkx>=3.0",
+    "pathspec>=0.12",
+
+    # ============================================================
+    # 向量索引与检索
+    # ============================================================
+    "chromadb>=0.5",
+    "langchain-chroma>=0.2",
+    "sentence-transformers>=3.0",
+    "tiktoken>=0.7",
+
+    # ============================================================
+    # 沙箱与执行
+    # ============================================================
+    "docker>=7.0",
+
+    # ============================================================
+    # 状态与记忆
+    # ============================================================
+    "langgraph-checkpoint-sqlite>=2.0",
+    "langgraph-checkpoint-postgres>=2.0",
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
+
+    # ============================================================
+    # MCP
+    # ============================================================
+    "langchain-mcp-adapters>=0.1",
+    "mcp>=1.24.0,<2.0.0",
+    "fastmcp>=2.0",
+    "GitPython>=3.1",
+
+    # ============================================================
+    # API 服务
+    # ============================================================
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.12",
+
+    # ============================================================
+    # 可观测性
+    # ============================================================
+    "langsmith>=0.2",
+    "structlog>=24.0",
+    "rich>=13.9",
+    "typer>=0.12",
+
+    # ============================================================
+    # 工具函数
+    # ============================================================
+    "pyyaml>=6.0",
+    "tenacity>=9.0",
+    "httpx>=0.27",
+    "orjson>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    # 测试
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "pytest-mock>=3.14",
+    "pytest-xdist>=3.6",
+    "pytest-timeout>=2.3",
+    "freezegun>=1.5",
+
+    # 代码质量
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "black>=24.10",
+    "isort>=5.13",
+
+    # 类型存根
+    "types-requests>=2.32",
+    "types-pyyaml>=6.0",
+]
+
+# 云端沙箱（可选）
+sandbox-cloud = [
+    "e2b-code-interpreter>=0.2",
+    "modal>=0.65",
+    "daytona-sdk>=0.10",
+]
+
+# 本地推理引擎（可选）
+local-inference = [
+    "vllm>=0.6",
+    "sglang>=0.4",
+    "huggingface-hub>=0.26",
+]
+
+# ============================================================
+# CLI 入口
+# ============================================================
+[project.scripts]
+coding-agent = "agent.main:main"
+
+# ============================================================
+# URL
+# ============================================================
+[project.urls]
+Homepage = "https://github.com/yourname/coding-agent"
+Documentation = "https://github.com/yourname/coding-agent#readme"
+Repository = "https://github.com/yourname/coding-agent.git"
+Issues = "https://github.com/yourname/coding-agent/issues"
+
+# ============================================================
+# 构建配置
+# ============================================================
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "agent*",
+    "sandbox*",
+    "tools*",
+    "codebase*",
+    "middleware*",
+    "context*",
+    "observability*",
+    "skills*",
+    "mcp_client*",          # ← 改动：coding_mcp* → mcp_client*
+    "memory*",
+    "perf*",
+    "evals*",
+    "api*",
+]
+exclude = [
+    "tests*",
+    "frontend*",
+    "docs*",
+    "deploy*",
+    "docker*",
+    "scripts*",
+    "*.egg-info",
+]
+
+# 打包时包含非 Python 资源（prompts、queries、skills 定义等）
+[tool.setuptools.package-data]
+agent = ["py.typed"]
+"*" = [
+    "*.md",
+    "*.scm",
+    "*.yaml",
+    "*.yml",
+    "*.json",
+]
+
+# ============================================================
+# Ruff（Lint + 格式化）
+# ============================================================
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "frontend",
+    "node_modules",
+    ".coding-agent",
+    "docs",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # 行太长由 formatter 处理
+    "B008",   # 函数调用作默认值（FastAPI 依赖需要）
+    "ARG001", # 未使用的函数参数（保留接口一致性）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ARG", "SIM"]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ============================================================
+# Mypy（类型检查）
+# ============================================================
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false   # 逐步收紧
+ignore_missing_imports = true
+exclude = [
+    "frontend/",
+    "node_modules/",
+    "\\.venv/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "chromadb.*",
+    "docker.*",
+    "tree_sitter.*",
+    "langchain_mcp_adapters.*",
+    "mcp.*",
+]
+ignore_missing_imports = true
+
+# ============================================================
+# Pytest
+# ============================================================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+]
+markers = [
+    "integration: 需要外部依赖（Docker、数据库等）的测试",
+    "slow: 慢速测试（> 5 秒）",
+    "e2e: 端到端测试",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# ============================================================
+# Coverage
+# ============================================================
+[tool.coverage.run]
+source = ["agent", "tools", "codebase", "sandbox", "context", "middleware"]
+omit = [
+    "*/tests/*",
+    "*/frontend/*",
+    "*/node_modules/*",
+    "*/mcp_client/servers/*",   # ← 改动：*/mcp/servers/* → */mcp_client/servers/*
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+# ============================================================
+# Black（兼容配置，实际用 ruff format）
+# ============================================================
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = '''
+/(
+    \.venv
+  | frontend
+  | node_modules
+)/
+'''
+
+# ============================================================
+# isort（兼容配置，实际用 ruff 的 I 规则）
+# ============================================================
+[tool.isort]
+profile = "black"
+line_length = 100
+skip = [".venv", "frontend", "node_modules"]

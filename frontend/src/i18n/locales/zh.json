@@ -1,0 +1,260 @@
+{
+  "app": {
+    "title": "Coding Agent",
+    "loading": "加载中...",
+    "error": "错误",
+    "retry": "重试",
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "save": "保存",
+    "close": "关闭",
+    "copy": "复制",
+    "copied": "已复制",
+    "unknown": "未知",
+    "empty": "空"
+  },
+  "nav": {
+    "workbench": "工作台",
+    "dashboard": "仪表盘"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}} 分钟前",
+    "hoursAgo": "{{count}} 小时前",
+    "daysAgo": "{{count}} 天前"
+  },
+  "sidebar": {
+    "newSession": "新建会话",
+    "searchPlaceholder": "搜索会话...",
+    "noSessions": "暂无会话",
+    "noSessionsHint": "点击上方\"+ 新建\"开始",
+    "noSearchResult": "无匹配结果",
+    "totalSessions": "共 {{count}} 个会话",
+    "groups": {
+      "today": "今天",
+      "thisWeek": "本周",
+      "earlier": "更早",
+      "archived": "已归档"
+    },
+    "item": {
+      "messages": "{{count}} 条",
+      "menu": {
+        "rename": "重命名",
+        "pin": "置顶",
+        "unpin": "取消置顶",
+        "archive": "归档",
+        "unarchive": "取消归档",
+        "delete": "删除",
+        "confirmDelete": "确认删除？"
+      }
+    }
+  },
+  "chat": {
+    "welcome": "Coding Agent",
+    "welcomeHint": "描述一个任务，Agent 会读取代码、修改文件、运行测试",
+    "tryExample": "试试：",
+    "exampleTask": "审批 帮我跑测试",
+    "inputPlaceholder": "描述你的任务... (Enter 发送，Shift+Enter 换行)",
+    "send": "发送",
+    "abort": "中断",
+    "readonlyHint": "当前角色为只读，无法发送消息",
+    "backToBottom": "回到底部",
+    "emptyToolOutput": "(无输出)",
+    "truncated": "... (已截断)"
+  },
+  "approval": {
+    "title": "需要人工审批",
+    "tool": "工具",
+    "params": "参数",
+    "editParams": "编辑参数（JSON）",
+    "undo": "撤销",
+    "approve": "批准",
+    "edit": "编辑",
+    "reject": "拒绝",
+    "submitAndApprove": "提交修改并批准",
+    "submitting": "提交中...",
+    "timeout": "已超时",
+    "noPermission": "当前角色无审批权限，请等待开发者处理",
+    "editHint": "提示: Cmd/Ctrl+Enter 提交，Esc 取消",
+    "parseError": "JSON 解析失败: {{message}}",
+    "mustBeObject": "必须是一个 JSON 对象"
+  },
+  "artifact": {
+    "tabs": {
+      "diff": "Diff",
+      "files": "文件",
+      "terminal": "终端",
+      "context": "上下文",
+      "approvals": "审批"
+    },
+    "empty": {
+      "diff": "执行任务后，文件修改会显示在这里",
+      "diffNoChange": "本次会话暂无文件修改",
+      "terminal": "执行任务后，终端输出会显示在这里",
+      "terminalEmpty": "暂无终端输出",
+      "files": "(空目录)",
+      "context": "开始对话后显示上下文用量",
+      "approvals": "开始对话后，审批记录会显示在这里"
+    },
+    "diff": {
+      "before": "修改前",
+      "after": "修改后",
+      "split": "并排",
+      "unified": "统一"
+    },
+    "terminal": {
+      "copyOutput": "复制输出"
+    },
+    "context": {
+      "usage": "上下文用量",
+      "used": "已使用",
+      "cacheHit": "缓存命中",
+      "tokens": "Token",
+      "compaction": "压缩事件",
+      "cost": "本次成本",
+      "offloaded": "已卸载文件 ({{count}})"
+    },
+    "file": {
+      "copy": "复制",
+      "close": "关闭",
+      "loadFailed": "加载失败"
+    },
+    "approvalHistory": {
+      "all": "全部",
+      "approve": "已批准",
+      "reject": "已拒绝",
+      "edit": "已编辑",
+      "export": "导出",
+      "noRecords": "暂无审批记录",
+      "noMatch": "当前筛选下无记录",
+      "operator": "操作人",
+      "editedArgs": "编辑后的参数",
+      "args": "参数"
+    }
+  },
+  "auth": {
+    "login": "登录",
+    "logout": "退出登录",
+    "loginTitle": "Coding Agent",
+    "loginSubtitle": "选择账号以体验不同权限",
+    "loginWithSSO": "使用 SSO 登录",
+    "loginViaProvider": "请通过企业 SSO 登录",
+    "devModeHint": "当前为开发模式，实际部署时使用企业 SSO",
+    "roles": "角色",
+    "role": {
+      "admin": "管理员",
+      "developer": "开发者",
+      "viewer": "只读"
+    },
+    "needLogin": "需要登录",
+    "needRole": "需要 {{role}} 权限",
+    "roleDescriptions": {
+      "admin": "完整权限，可管理所有会话",
+      "developer": "可发消息、编辑文件、审批工具",
+      "viewer": "只读，不能发消息或审批"
+    }
+  },
+  "dashboard": {
+    "title": "可观测性仪表盘",
+    "back": "返回",
+    "refresh": "刷新",
+    "loadFailed": "加载失败",
+    "noData": "无数据",
+    "stats": {
+      "llmCalls": "LLM 调用",
+      "toolsCall": "工具 {{value}} 次",
+      "inputTokens": "输入 Tokens",
+      "cacheRead": "缓存读 {{value}}",
+      "outputTokens": "输出 Tokens",
+      "cacheHitRate": "缓存命中率",
+      "excellent": "优秀",
+      "good": "良好",
+      "needsWork": "待优化",
+      "totalCost": "总成本",
+      "avgLatency": "平均延迟 {{value}}ms"
+    },
+    "charts": {
+      "tokensTrend": "Token 消耗趋势",
+      "callsTrend": "调用次数趋势",
+      "costTrend": "成本趋势",
+      "latencyTrend": "延迟趋势",
+      "toolTop10": "工具调用 Top 10",
+      "compaction": "上下文压缩分层",
+      "costBreakdown": "成本明细"
+    },
+    "metrics": {
+      "input": "输入",
+      "output": "输出",
+      "cacheRead": "缓存读",
+      "cacheWrite": "缓存写",
+      "totalCost": "总成本",
+      "cacheSavings": "缓存节省",
+      "calls": "调用次数",
+      "avgLatency": "平均延迟 (ms)",
+      "cost": "成本 (USD)",
+      "llmCalls": "LLM 调用",
+      "toolCalls": "工具调用"
+    },
+    "range": {
+      "1h": "1 小时",
+      "24h": "24 小时",
+      "7d": "7 天",
+      "30d": "30 天",
+      "all": "全部"
+    },
+    "footer": "每 {{seconds}} 秒聚合一个数据点 · 共 {{count}} 个点",
+    "compactionLayers": {
+      "L1": "L1 预算控制",
+      "L2": "L2 噪声删除",
+      "L3": "L3 API 微压缩",
+      "L4": "L4 归档摘要",
+      "L5": "L5 全量压缩"
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "theme": "主题",
+    "themeLight": "浅色",
+    "themeDark": "深色",
+    "themeSystem": "跟随系统",
+    "language": "语言",
+    "languageZh": "中文",
+    "languageEn": "English"
+  },
+  "offline": {
+    "message": "网络连接已断开，功能可能受限",
+    "reload": "重新加载"
+  },
+  "palette": {
+    "placeholder": "输入命令或搜索...",
+    "noResults": "无匹配命令",
+    "newSession": "新建会话",
+    "openDashboard": "打开仪表盘",
+    "openSettings": "打开设置",
+    "themeLight": "切换到浅色主题",
+    "themeDark": "切换到深色主题",
+    "themeSystem": "跟随系统主题",
+    "langZh": "切换到中文",
+    "langEn": "Switch to English",
+    "navigate": "导航",
+    "select": "选择",
+    "close": "关闭"
+  },
+  "notifications": {
+    "taskCompleted": "任务完成",
+    "taskFailed": "任务失败",
+    "approvalRequired": "需要审批",
+    "approvalRequiredDesc": "{{tool}} 需要你确认",
+    "networkError": "网络错误",
+    "copiedToClipboard": "已复制到剪贴板",
+    "sessionCreated": "会话已创建",
+    "sessionDeleted": "会话已删除"
+  },
+  "errors": {
+    "network": "网络错误",
+    "timeout": "请求超时（{{ms}}ms）",
+    "httpError": "HTTP {{status}}",
+    "loadFailed": "加载失败"
+  }
+}

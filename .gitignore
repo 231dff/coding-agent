@@ -1,0 +1,56 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# ===== 测试 / 缓存 =====
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# ===== 前端 =====
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+.pnpm-store/
+
+# ===== Agent 运行时元数据（本地生成）=====
+.coding-agent/
+.code_index/
+.agent_memory/
+.trajectories/
+.context_offload/
+
+# ===== 环境变量（含密钥，切勿提交）=====
+.env
+.env.local
+.env.*.local
+!.env.example
+deploy/.env
+!deploy/.env.example
+!deploy/.env.auth.example
+
+# ===== 编辑器 / IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ===== 日志 =====
+*.log
+logs/

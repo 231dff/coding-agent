@@ -1,0 +1,14 @@
+category: dep_upgrade
+tasks:
+  - id: upgrade_api_usage
+    description: "把 requests.get(url) 调用更新为 requests.get(url, timeout=10)。"
+    setup:
+      client.py: |
+        import requests
+
+        def fetch(url):
+            return requests.get(url).json()
+    success_assert: |
+      "timeout" in (ws / "client.py").read_text()
+    expected_tools: [read_file, edit_file]
+    token_budget: 5000

@@ -1,0 +1,37 @@
+category: multi_file
+tasks:
+  - id: rename_across_files
+    description: "把 service.py 里的 process 重命名为 handle，并同步更新所有调用方。"
+    setup:
+      service.py: |
+        def process(data):
+            return data
+
+        def other():
+            return process(1)
+      api.py: |
+        from service import process
+
+        def handler(req):
+            return process(req)
+    success_assert: |
+      all("handle" in (ws / f).read_text() for f in ["service.py", "api.py"]) and \
+      all("process" not in (ws / f).read_text() for f in ["service.py", "api.py"])
+    expected_tools: [analyze_impact, find_callers, begin_transaction, tx_edit, tx_commit]
+    token_budget: 8000
+
+  - id: add_param_with_callers
+    description: "给 utils.py 的 format_date 函数添加 tz 参数，默认 UTC，并更新所有调用方。"
+    setup:
+      utils.py: |
+        def format_date(d):
+            return str(d)
+      main.py: |
+        from utils import format_date
+        print(format_date("2026-01-01"))
+    success_assert: |
+      "tz" in (ws / "utils.py").read_text() and \
+      "tz" in (ws / "main.py").read_text()
+    expected_tools: [analyze_impact, read_file, edit_file]
+    token_budget: 8000
+    

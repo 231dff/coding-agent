@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>Coding Agent</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // 防止深色模式闪烁：在 React 挂载前应用主题
+      (function () {
+        try {
+          var stored = localStorage.getItem("coding-agent-theme");
+          var mode = "system";
+          if (stored) {
+            try {
+              var parsed = JSON.parse(stored);
+              mode = parsed.state?.mode || "system";
+            } catch (e) {}
+          }
+          var isDark = false;
+          if (mode === "dark") {
+            isDark = true;
+          } else if (mode === "system") {
+            isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          }
+          if (isDark) {
+            document.documentElement.classList.add("dark");
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute("content", "#0d1117");
+          }
+        } catch (e) {
+          // 忽略：本地存储不可用
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

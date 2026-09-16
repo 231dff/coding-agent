@@ -1,0 +1,260 @@
+{
+    "app": {
+      "title": "Coding Agent",
+      "loading": "Loading...",
+      "error": "Error",
+      "retry": "Retry",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "delete": "Delete",
+      "save": "Save",
+      "close": "Close",
+      "copy": "Copy",
+      "copied": "Copied",
+      "unknown": "Unknown",
+      "empty": "Empty"
+    },
+    "nav": {
+      "workbench": "Workbench",
+      "dashboard": "Dashboard"
+    },
+    "time": {
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
+    },
+    "sidebar": {
+      "newSession": "New Session",
+      "searchPlaceholder": "Search sessions...",
+      "noSessions": "No sessions",
+      "noSessionsHint": "Click \"+ New\" above to start",
+      "noSearchResult": "No matches",
+      "totalSessions": "{{count}} sessions",
+      "groups": {
+        "today": "Today",
+        "thisWeek": "This Week",
+        "earlier": "Earlier",
+        "archived": "Archived"
+      },
+      "item": {
+        "messages": "{{count}} msgs",
+        "menu": {
+          "rename": "Rename",
+          "pin": "Pin",
+          "unpin": "Unpin",
+          "archive": "Archive",
+          "unarchive": "Unarchive",
+          "delete": "Delete",
+          "confirmDelete": "Confirm delete?"
+        }
+      }
+    },
+    "chat": {
+      "welcome": "Coding Agent",
+      "welcomeHint": "Describe a task. The agent will read code, edit files, and run tests.",
+      "tryExample": "Try:",
+      "exampleTask": "approval run tests for me",
+      "inputPlaceholder": "Describe your task... (Enter to send, Shift+Enter for newline)",
+      "send": "Send",
+      "abort": "Abort",
+      "readonlyHint": "Read-only role, cannot send messages",
+      "backToBottom": "Back to bottom",
+      "emptyToolOutput": "(no output)",
+      "truncated": "... (truncated)"
+    },
+    "approval": {
+      "title": "Manual Approval Required",
+      "tool": "Tool",
+      "params": "Parameters",
+      "editParams": "Edit Parameters (JSON)",
+      "undo": "Undo",
+      "approve": "Approve",
+      "edit": "Edit",
+      "reject": "Reject",
+      "submitAndApprove": "Submit and Approve",
+      "submitting": "Submitting...",
+      "timeout": "Timed out",
+      "noPermission": "No approval permission. Wait for a developer.",
+      "editHint": "Hint: Cmd/Ctrl+Enter to submit, Esc to cancel",
+      "parseError": "JSON parse error: {{message}}",
+      "mustBeObject": "Must be a JSON object"
+    },
+    "artifact": {
+      "tabs": {
+        "diff": "Diff",
+        "files": "Files",
+        "terminal": "Terminal",
+        "context": "Context",
+        "approvals": "Approvals"
+      },
+      "empty": {
+        "diff": "File changes will appear here after tasks",
+        "diffNoChange": "No file changes in this session",
+        "terminal": "Terminal output will appear here after tasks",
+        "terminalEmpty": "No terminal output",
+        "files": "(empty directory)",
+        "context": "Start a conversation to see context usage",
+        "approvals": "Approval records will appear here"
+      },
+      "diff": {
+        "before": "Before",
+        "after": "After",
+        "split": "Split",
+        "unified": "Unified"
+      },
+      "terminal": {
+        "copyOutput": "Copy output"
+      },
+      "context": {
+        "usage": "Context Usage",
+        "used": "used",
+        "cacheHit": "Cache Hit",
+        "tokens": "Tokens",
+        "compaction": "Compaction Events",
+        "cost": "Session Cost",
+        "offloaded": "Offloaded Files ({{count}})"
+      },
+      "file": {
+        "copy": "Copy",
+        "close": "Close",
+        "loadFailed": "Load failed"
+      },
+      "approvalHistory": {
+        "all": "All",
+        "approve": "Approved",
+        "reject": "Rejected",
+        "edit": "Edited",
+        "export": "Export",
+        "noRecords": "No approval records",
+        "noMatch": "No records match filter",
+        "operator": "Operator",
+        "editedArgs": "Edited Arguments",
+        "args": "Arguments"
+      }
+    },
+    "auth": {
+      "login": "Login",
+      "logout": "Logout",
+      "loginTitle": "Coding Agent",
+      "loginSubtitle": "Select an account to explore different permissions",
+      "loginWithSSO": "Login with SSO",
+      "loginViaProvider": "Please login via enterprise SSO",
+      "devModeHint": "Development mode. Enterprise SSO is used in production.",
+      "roles": "Roles",
+      "role": {
+        "admin": "Admin",
+        "developer": "Developer",
+        "viewer": "Viewer"
+      },
+      "needLogin": "Login required",
+      "needRole": "{{role}} permission required",
+      "roleDescriptions": {
+        "admin": "Full permissions, can manage all sessions",
+        "developer": "Can send messages, edit files, approve tools",
+        "viewer": "Read-only, cannot send or approve"
+      }
+    },
+    "dashboard": {
+      "title": "Observability Dashboard",
+      "back": "Back",
+      "refresh": "Refresh",
+      "loadFailed": "Load failed",
+      "noData": "No data",
+      "stats": {
+        "llmCalls": "LLM Calls",
+        "toolsCall": "{{value}} tool calls",
+        "inputTokens": "Input Tokens",
+        "cacheRead": "cache read {{value}}",
+        "outputTokens": "Output Tokens",
+        "cacheHitRate": "Cache Hit Rate",
+        "excellent": "Excellent",
+        "good": "Good",
+        "needsWork": "Needs Work",
+        "totalCost": "Total Cost",
+        "avgLatency": "avg {{value}}ms"
+      },
+      "charts": {
+        "tokensTrend": "Token Usage Trend",
+        "callsTrend": "Call Count Trend",
+        "costTrend": "Cost Trend",
+        "latencyTrend": "Latency Trend",
+        "toolTop10": "Top 10 Tools",
+        "compaction": "Context Compaction Layers",
+        "costBreakdown": "Cost Breakdown"
+      },
+      "metrics": {
+        "input": "Input",
+        "output": "Output",
+        "cacheRead": "Cache Read",
+        "cacheWrite": "Cache Write",
+        "totalCost": "Total Cost",
+        "cacheSavings": "Cache Savings",
+        "calls": "Calls",
+        "avgLatency": "Avg Latency (ms)",
+        "cost": "Cost (USD)",
+        "llmCalls": "LLM Calls",
+        "toolCalls": "Tool Calls"
+      },
+      "range": {
+        "1h": "1h",
+        "24h": "24h",
+        "7d": "7d",
+        "30d": "30d",
+        "all": "All"
+      },
+      "footer": "Bucket size {{seconds}}s · {{count}} points",
+      "compactionLayers": {
+        "L1": "L1 Budget Control",
+        "L2": "L2 Noise Removal",
+        "L3": "L3 API Micro-compaction",
+        "L4": "L4 Archival Summary",
+        "L5": "L5 Full Compaction"
+      }
+    },
+    "settings": {
+      "title": "Settings",
+      "theme": "Theme",
+      "themeLight": "Light",
+      "themeDark": "Dark",
+      "themeSystem": "System",
+      "language": "Language",
+      "languageZh": "中文",
+      "languageEn": "English"
+    },
+    "offline": {
+      "message": "Network connection lost. Features may be limited.",
+      "reload": "Reload"
+    },
+    "palette": {
+      "placeholder": "Type a command or search...",
+      "noResults": "No matching commands",
+      "newSession": "New Session",
+      "openDashboard": "Open Dashboard",
+      "openSettings": "Open Settings",
+      "themeLight": "Switch to Light Theme",
+      "themeDark": "Switch to Dark Theme",
+      "themeSystem": "Follow System Theme",
+      "langZh": "切换到中文",
+      "langEn": "Switch to English",
+      "navigate": "navigate",
+      "select": "select",
+      "close": "close"
+    },
+    "notifications": {
+      "taskCompleted": "Task Completed",
+      "taskFailed": "Task Failed",
+      "approvalRequired": "Approval Required",
+      "approvalRequiredDesc": "{{tool}} needs your confirmation",
+      "networkError": "Network Error",
+      "copiedToClipboard": "Copied to clipboard",
+      "sessionCreated": "Session created",
+      "sessionDeleted": "Session deleted"
+    },
+    "errors": {
+      "network": "Network error",
+      "timeout": "Request timeout ({{ms}}ms)",
+      "httpError": "HTTP {{status}}",
+      "loadFailed": "Load failed"
+    }
+  }

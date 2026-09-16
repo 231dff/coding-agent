@@ -1,0 +1,34 @@
+category: single_file
+tasks:
+  - id: fix_add_bug
+    description: "calc.py 的 add 函数返回值有 bug，请读取并修复。"
+    setup:
+      calc.py: |
+        def add(a, b):
+            return a - b  # BUG
+    success_assert: |
+      "return a + b" in (ws / "calc.py").read_text()
+    expected_tools: [read_file, edit_file]
+    token_budget: 3000
+
+  - id: add_docstring
+    description: "给 calc.py 的 add 函数添加 docstring。"
+    setup:
+      calc.py: |
+        def add(a, b):
+            return a + b
+    success_assert: |
+      '"""' in (ws / "calc.py").read_text()
+    expected_tools: [read_file, edit_file]
+    token_budget: 3000
+
+  - id: rename_function
+    description: "把 util.py 里的 old_name 重命名为 new_name。"
+    setup:
+      util.py: |
+        def old_name():
+            return 42
+    success_assert: |
+      "new_name" in (ws / "util.py").read_text() and "old_name" not in (ws / "util.py").read_text()
+    expected_tools: [read_file, edit_file]
+    token_budget: 3000

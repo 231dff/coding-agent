@@ -1,0 +1,78 @@
+{
+  "model": "openai:qwen3.8-max-0902",
+  "total": 10,
+  "passed": 9,
+  "success_rate": 0.9,
+  "details": [
+    {
+      "name": "fix_bug",
+      "passed": true,
+      "tool_calls": 4,
+      "elapsed_s": 13.74,
+      "error": null
+    },
+    {
+      "name": "rename_function",
+      "passed": true,
+      "tool_calls": 3,
+      "elapsed_s": 14.35,
+      "error": null
+    },
+    {
+      "name": "add_comment",
+      "passed": false,
+      "tool_calls": -1,
+      "elapsed_s": 12.98,
+      "error": "'gbk' codec can't decode byte 0x8e in position 33: illegal multibyte sequence"
+    },
+    {
+      "name": "multi_file_edit",
+      "passed": true,
+      "tool_calls": 2,
+      "elapsed_s": 13.96,
+      "error": null
+    },
+    {
+      "name": "search_and_edit",
+      "passed": true,
+      "tool_calls": 4,
+      "elapsed_s": 20.36,
+      "error": null
+    },
+    {
+      "name": "read_nonexistent",
+      "passed": true,
+      "tool_calls": 1,
+      "elapsed_s": 7.71,
+      "error": null
+    },
+    {
+      "name": "edit_conflict_recovery",
+      "passed": true,
+      "tool_calls": 3,
+      "elapsed_s": 10.74,
+      "error": null
+    },
+    {
+      "name": "glob_and_read",
+      "passed": true,
+      "tool_calls": 2,
+      "elapsed_s": 11.0,
+      "error": null
+    },
+    {
+      "name": "grep_and_report",
+      "passed": true,
+      "tool_calls": 2,
+      "elapsed_s": 11.84,
+      "error": null
+    },
+    {
+      "name": "no_op_task",
+      "passed": true,
+      "tool_calls": 2,
+      "elapsed_s": 6.58,
+      "error": null
+    }
+  ]
+}
