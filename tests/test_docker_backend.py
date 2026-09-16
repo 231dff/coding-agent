@@ -17,10 +17,10 @@ import pytest
 
 from sandbox.docker_backend import DockerSandbox
 
-
 # ============================================================
 # 环境检测
 # ============================================================
+
 
 def _docker_usable() -> bool:
     """检查当前环境是否可以跑本测试。
@@ -51,16 +51,14 @@ def _docker_usable() -> bool:
 
 pytestmark = pytest.mark.skipif(
     not _docker_usable(),
-    reason=(
-        "需要 Linux Docker daemon。"
-        "Windows runner / 无 Docker 环境 / daemon 未启动时跳过。"
-    ),
+    reason=("需要 Linux Docker daemon。Windows runner / 无 Docker 环境 / daemon 未启动时跳过。"),
 )
 
 
 # ============================================================
 # Fixtures
 # ============================================================
+
 
 @pytest.fixture
 def sandbox(tmp_path):
@@ -74,6 +72,7 @@ def sandbox(tmp_path):
 # ============================================================
 # 测试
 # ============================================================
+
 
 def test_exec_simple(sandbox):
     result = sandbox.exec("echo hello")
