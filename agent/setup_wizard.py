@@ -10,6 +10,7 @@
 - 模型名允许任意值
 - temperature 允许跳过（不发送该参数）
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,25 +31,17 @@ def _ask_model_name(provider: ProviderInfo, console: Console) -> str:
     """
     console.print()
     console.print("[bold]选择模型[/bold]")
-    console.print(
-        "[dim]以下为常用模型（仅供参考）。可输入任意模型名。[/dim]\n"
-    )
+    console.print("[dim]以下为常用模型（仅供参考）。可输入任意模型名。[/dim]\n")
 
     if provider.example_models:
         for i, m in enumerate(provider.example_models, 1):
-            mark = (
-                " [green](默认)[/green]"
-                if m == provider.default_model
-                else ""
-            )
+            mark = " [green](默认)[/green]" if m == provider.default_model else ""
             console.print(f"  [cyan]{i:2d}.[/cyan] {m}{mark}")
         console.print()
 
     manual_idx = len(provider.example_models) + 1
     if provider.example_models:
-        console.print(
-            f"  [cyan]{manual_idx:2d}.[/cyan] [bold]手动输入模型名[/bold]"
-        )
+        console.print(f"  [cyan]{manual_idx:2d}.[/cyan] [bold]手动输入模型名[/bold]")
         console.print()
 
         default_choice = (
@@ -59,9 +52,7 @@ def _ask_model_name(provider: ProviderInfo, console: Console) -> str:
 
         choice = Prompt.ask(
             "[bold]请选择[/bold]",
-            choices=[
-                str(i) for i in range(1, len(provider.example_models) + 2)
-            ],
+            choices=[str(i) for i in range(1, len(provider.example_models) + 2)],
             default=default_choice,
         )
 
@@ -88,20 +79,21 @@ def run_setup_wizard(project_path: Path) -> bool:
     project_cfg_path = project_config_file(project_path)
     existing_keys = list_providers_with_keys()
 
-    console.print(Panel(
-        f"[bold cyan]Coding Agent 配置向导[/bold cyan]\n\n"
-        f"配置将保存到：[dim]{project_cfg_path}[/dim]\n"
-        f"API Key 保存到：[dim]~/.coding-agent/credentials.yaml[/dim]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            f"[bold cyan]Coding Agent 配置向导[/bold cyan]\n\n"
+            f"配置将保存到：[dim]{project_cfg_path}[/dim]\n"
+            f"API Key 保存到：[dim]~/.coding-agent/credentials.yaml[/dim]",
+            border_style="cyan",
+        )
+    )
 
     # ---------- 检测全局配置，问是否复用 ----------
     if global_config_file().exists():
         import yaml
+
         try:
-            global_cfg = yaml.safe_load(
-                global_config_file().read_text(encoding="utf-8")
-            ) or {}
+            global_cfg = yaml.safe_load(global_config_file().read_text(encoding="utf-8")) or {}
         except Exception:
             global_cfg = {}
 
@@ -119,9 +111,7 @@ def run_setup_wizard(project_path: Path) -> bool:
             ):
                 project_cfg = {
                     "provider": global_cfg.get("provider", "qwen"),
-                    "langchain_provider": global_cfg.get(
-                        "langchain_provider", "openai"
-                    ),
+                    "langchain_provider": global_cfg.get("langchain_provider", "openai"),
                     "model": global_cfg.get("model", "qwen-max"),
                     "base_url": global_cfg.get("base_url", ""),
                     "timeout": global_cfg.get("timeout", 120),
@@ -132,26 +122,16 @@ def run_setup_wizard(project_path: Path) -> bool:
                     project_cfg["temperature"] = global_cfg["temperature"]
 
                 save_yaml_config(project_cfg_path, project_cfg)
-                console.print(
-                    f"\n[green]✓[/green] 已复制全局配置到项目"
-                )
-                console.print(
-                    f"[green]✓[/green] 保存到: {project_cfg_path}"
-                )
+                console.print("\n[green]✓[/green] 已复制全局配置到项目")
+                console.print(f"[green]✓[/green] 保存到: {project_cfg_path}")
                 return True
 
     # ---------- 选择 Provider ----------
     console.print("\n[bold]可用的模型 Provider:[/bold]\n")
     for i, p in enumerate(PROVIDERS, 1):
         key_note = " [dim](无需 Key)[/dim]" if not p.needs_key else ""
-        has_key = (
-            " [green]✓ 已保存 Key[/green]"
-            if p.id in existing_keys
-            else ""
-        )
-        console.print(
-            f"  [cyan]{i:2d}.[/cyan] {p.name}{key_note}{has_key}"
-        )
+        has_key = " [green]✓ 已保存 Key[/green]" if p.id in existing_keys else ""
+        console.print(f"  [cyan]{i:2d}.[/cyan] {p.name}{key_note}{has_key}")
 
     console.print()
     choice = Prompt.ask(
@@ -161,9 +141,7 @@ def run_setup_wizard(project_path: Path) -> bool:
     )
     provider = PROVIDERS[int(choice) - 1]
 
-    console.print(
-        f"\n[green]✓[/green] 已选择: [bold]{provider.name}[/bold]"
-    )
+    console.print(f"\n[green]✓[/green] 已选择: [bold]{provider.name}[/bold]")
     if provider.notes:
         console.print(f"[dim]{provider.notes}[/dim]")
 
@@ -175,17 +153,13 @@ def run_setup_wizard(project_path: Path) -> bool:
         if existing_key:
             masked = f"{existing_key[:8]}...{existing_key[-4:]}"
             console.print()
-            console.print(
-                f"[dim]检测到已保存的 Key: {masked}[/dim]"
-            )
+            console.print(f"[dim]检测到已保存的 Key: {masked}[/dim]")
             if Confirm.ask("是否复用该 Key?", default=True):
                 api_key = existing_key
 
         if not api_key:
             if provider.key_url:
-                console.print(
-                    f"[dim]API Key 申请地址: {provider.key_url}[/dim]"
-                )
+                console.print(f"[dim]API Key 申请地址: {provider.key_url}[/dim]")
             api_key = Prompt.ask(
                 f"\n[bold]请输入 {provider.env_key}[/bold]",
                 password=True,
@@ -194,9 +168,7 @@ def run_setup_wizard(project_path: Path) -> bool:
                 console.print("[red]API Key 不能为空[/red]")
                 return False
             set_api_key(provider.id, api_key)
-            console.print(
-                "[green]✓[/green] Key 已保存到全局凭据"
-            )
+            console.print("[green]✓[/green] Key 已保存到全局凭据")
 
     # ---------- 选择模型名 ----------
     model = _ask_model_name(provider, console)
@@ -226,13 +198,9 @@ def run_setup_wizard(project_path: Path) -> bool:
 
     if Confirm.ask("[bold]是否设置 temperature?[/bold]", default=False):
         try:
-            temperature = float(
-                Prompt.ask("temperature (0.0 - 2.0)", default="0.7")
-            )
+            temperature = float(Prompt.ask("temperature (0.0 - 2.0)", default="0.7"))
             if temperature < 0 or temperature > 2:
-                console.print(
-                    "[yellow]超出范围，改为不发送[/yellow]"
-                )
+                console.print("[yellow]超出范围，改为不发送[/yellow]")
                 temperature = None
         except ValueError:
             console.print("[yellow]无效值，改为不发送[/yellow]")
@@ -252,12 +220,8 @@ def run_setup_wizard(project_path: Path) -> bool:
         default=False,
     ):
         try:
-            timeout = int(
-                Prompt.ask("timeout (秒)", default="120")
-            )
-            model_window = int(
-                Prompt.ask("model_window (tokens)", default="200000")
-            )
+            timeout = int(Prompt.ask("timeout (秒)", default="120"))
+            model_window = int(Prompt.ask("model_window (tokens)", default="200000"))
         except ValueError:
             console.print("[yellow]数值格式错误，使用默认值[/yellow]")
             timeout, model_window = 120, 200000
@@ -278,16 +242,12 @@ def run_setup_wizard(project_path: Path) -> bool:
         project_cfg["temperature"] = temperature
 
     save_yaml_config(project_cfg_path, project_cfg)
-    console.print(
-        f"\n[green]✓[/green] 项目配置已保存: {project_cfg_path}"
-    )
+    console.print(f"\n[green]✓[/green] 项目配置已保存: {project_cfg_path}")
 
     # ---------- 测试连接 ----------
     console.print()
     if Confirm.ask("[bold]是否测试连接?[/bold]", default=True):
-        _test_connection(
-            provider, model, base_url, api_key, console, temperature
-        )
+        _test_connection(provider, model, base_url, api_key, console, temperature)
 
     console.print("\n[bold green]配置完成！[/bold green]")
     return True
@@ -307,6 +267,7 @@ def _test_connection(
     try:
         if provider.langchain_provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
+
             kwargs: dict = {
                 "model": model,
                 "api_key": api_key,
@@ -317,6 +278,7 @@ def _test_connection(
             llm = ChatAnthropic(**kwargs)
         else:
             from langchain_openai import ChatOpenAI
+
             kwargs = {
                 "model": model,
                 "api_key": api_key or "dummy",
@@ -328,22 +290,12 @@ def _test_connection(
             llm = ChatOpenAI(**kwargs)
 
         resp = llm.invoke("回复 OK 两个字")
-        content = (
-            resp.content
-            if isinstance(resp.content, str)
-            else str(resp.content)
-        )
-        console.print(
-            f"[green]✓ 连接成功[/green] 模型回复: {content[:50]}"
-        )
+        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        console.print(f"[green]✓ 连接成功[/green] 模型回复: {content[:50]}")
         return True
     except Exception as e:
-        console.print(
-            f"[red]✗ 连接失败: {type(e).__name__}: {e}[/red]"
-        )
-        console.print(
-            "[dim]配置已保存。可稍后重新运行 `coding-agent init`[/dim]"
-        )
+        console.print(f"[red]✗ 连接失败: {type(e).__name__}: {e}[/red]")
+        console.print("[dim]配置已保存。可稍后重新运行 `coding-agent init`[/dim]")
         return False
 
 
@@ -353,11 +305,13 @@ def maybe_run_first_time_setup(project_path: Path) -> bool:
         return False
 
     console = Console()
-    console.print(Panel(
-        f"[yellow]当前项目未配置模型[/yellow]\n\n"
-        f"项目: {project_path}\n"
-        f"将为该项目配置 Provider、API Key 和模型。",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            f"[yellow]当前项目未配置模型[/yellow]\n\n"
+            f"项目: {project_path}\n"
+            f"将为该项目配置 Provider、API Key 和模型。",
+            border_style="yellow",
+        )
+    )
     console.print()
     return run_setup_wizard(project_path)

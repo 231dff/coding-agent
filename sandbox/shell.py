@@ -3,12 +3,13 @@
 在同一容器内保持 cwd 和 shell 变量的连续性，
 避免每次命令都从 /workspace 开始。
 """
+
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
 
-from sandbox.base import Sandbox, ExecResult
+from sandbox.base import ExecResult, Sandbox
 
 
 @dataclass
@@ -18,6 +19,7 @@ class ShellSession:
     通过保存 cwd 和环境变量，在每次 exec 前重放，
     实现跨调用的状态保持。
     """
+
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     cwd: str = "/workspace"
     env: dict[str, str] = field(default_factory=dict)
@@ -96,6 +98,7 @@ class ShellManager:
     def _resolve_cwd(current: str, target: str) -> str:
         """解析 cd 目标路径（不实际验证存在性，由下次命令报错）。"""
         import posixpath
+
         if target.startswith("/"):
             return posixpath.normpath(target)
         return posixpath.normpath(posixpath.join(current, target))

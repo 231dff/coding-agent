@@ -3,6 +3,7 @@
 用法：
     uv run python scripts/check_imports.py
 """
+
 from __future__ import annotations
 
 import importlib
@@ -141,7 +142,7 @@ def main() -> int:
     if ok:
         print("  ✓ agent.core 可导入")
     else:
-        print(f"  ✗ agent.core 导入失败")
+        print("  ✗ agent.core 导入失败")
         print(f"    {err}")
 
     # 汇总

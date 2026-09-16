@@ -1,3 +1,10 @@
+---
+name: tdd_tests
+category: 实现与测试
+description: TDD 子文档：测试编写细则。内部引用，不单独触发。
+hidden: true
+---
+
 # Good and Bad Tests
 
 ## Good Tests

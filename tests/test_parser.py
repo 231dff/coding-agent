@@ -1,6 +1,7 @@
 """Day 6: 解析器单元测试。"""
+
 import pytest
-from pathlib import Path
+
 from codebase.parser import CodeParser
 
 
@@ -20,10 +21,7 @@ def project(tmp_path):
         "    def run(self):\n"
         "        return main()\n"
     )
-    (tmp_path / "utils.py").write_text(
-        "def helper():\n"
-        "    return 'ok'\n"
-    )
+    (tmp_path / "utils.py").write_text("def helper():\n    return 'ok'\n")
     return tmp_path
 
 

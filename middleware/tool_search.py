@@ -2,9 +2,8 @@
 
 让 Agent 通过关键词搜索发现工具，而非一次性看到所有工具定义。
 """
-from __future__ import annotations
 
-import re
+from __future__ import annotations
 
 from langchain.tools import tool
 

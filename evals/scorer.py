@@ -5,10 +5,11 @@
 - 效率：token 消耗、工具调用次数
 - 缓存命中率：成本相关
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import mean, median
+from statistics import mean
 
 from evals.runner import TaskResult
 
@@ -16,6 +17,7 @@ from evals.runner import TaskResult
 @dataclass
 class SuiteScore:
     """套件评分。"""
+
     total: int
     passed: int
     pass_rate: float
@@ -37,10 +39,7 @@ class SuiteScore:
             "按类别:",
         ]
         for cat, stats in self.by_category.items():
-            lines.append(
-                f"  {cat}: {stats['passed']}/{stats['total']} "
-                f"({stats['pass_rate']:.1%})"
-            )
+            lines.append(f"  {cat}: {stats['passed']}/{stats['total']} ({stats['pass_rate']:.1%})")
         return "\n".join(lines)
 
 
@@ -96,13 +95,11 @@ def compare_baselines(
     if current_score.pass_rate < baseline_score.pass_rate - regression_threshold:
         passed = False
         messages.append(
-            f"❌ 通过率回归: {baseline_score.pass_rate:.1%} → "
-            f"{current_score.pass_rate:.1%}"
+            f"❌ 通过率回归: {baseline_score.pass_rate:.1%} → {current_score.pass_rate:.1%}"
         )
     else:
         messages.append(
-            f"✓ 通过率: {current_score.pass_rate:.1%} "
-            f"(基线 {baseline_score.pass_rate:.1%})"
+            f"✓ 通过率: {current_score.pass_rate:.1%} (基线 {baseline_score.pass_rate:.1%})"
         )
 
     # 类别级回归检查

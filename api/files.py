@@ -3,6 +3,7 @@
 提供目录树和文件内容两个端点，供前端文件浏览器使用。
 所有端点需要认证。
 """
+
 from __future__ import annotations
 
 import os
@@ -12,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from agent.config import AgentConfig
 from api.auth import User, require_authenticated
-
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -40,7 +40,6 @@ IGNORE_DIRS = {
     ".context_offload",
     ".agent_memory",
     ".sandbox_outputs",
-    "node_modules",
 }
 
 # 忽略的文件/目录前缀
@@ -53,6 +52,7 @@ MAX_CONTENT_BYTES = 500_000
 # ============================================================
 # 辅助函数
 # ============================================================
+
 
 def _get_workspace() -> Path:
     """获取工作区路径。"""
@@ -103,6 +103,7 @@ def _relative(root: Path, target: Path) -> str:
 # ============================================================
 # 路由
 # ============================================================
+
 
 @router.get("/tree")
 async def get_tree(

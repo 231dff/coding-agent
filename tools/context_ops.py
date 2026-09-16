@@ -2,12 +2,12 @@
 
 让 Agent 能主动查看和操作上下文状态。
 """
+
 from __future__ import annotations
 
 from langchain.tools import tool
 
 from context.offload import ContextOffloader
-
 
 _OFFLOADER: ContextOffloader | None = None
 

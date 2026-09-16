@@ -1,3 +1,11 @@
+---
+name: setup-matt-pocock-skills_domain
+category: 用户主动触发
+description: setup-matt-pocock-skills 子文档：domain 配置。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Domain Docs
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.

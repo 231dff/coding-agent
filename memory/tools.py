@@ -1,10 +1,10 @@
 """Day 26: 记忆工具的 LangChain 封装。"""
+
 from __future__ import annotations
 
 from langchain.tools import tool
 
 from memory.project_memory import ProjectMemory
-
 
 _PROJECT_MEMORY: ProjectMemory | None = None
 
@@ -41,7 +41,7 @@ def update_memory(section: str, text: str) -> str:
     added = _PROJECT_MEMORY.add(section, text)
     if added:
         return f"OK: 已添加 [{section}] {text}"
-    return f"SKIP: 条目已存在或无效"
+    return "SKIP: 条目已存在或无效"
 
 
 @tool

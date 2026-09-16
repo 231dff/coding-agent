@@ -3,10 +3,11 @@
 LLM 驱动的完整压缩，作为最后手段。
 配备连续失败的熔断器，避免在压缩失败的会话上持续烧钱。
 """
+
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -14,14 +15,15 @@ from langchain_core.messages import BaseMessage, HumanMessage
 
 
 class CircuitState(str, Enum):
-    CLOSED = "closed"        # 正常
-    OPEN = "open"            # 熔断中
+    CLOSED = "closed"  # 正常
+    OPEN = "open"  # 熔断中
     HALF_OPEN = "half_open"  # 半开（探测恢复）
 
 
 @dataclass
 class FullCompactionConfig:
     """全量压缩配置。"""
+
     # 触发阈值
     trigger_fraction: float = 0.95
     # 目标压缩比例
@@ -81,8 +83,10 @@ class CircuitBreaker:
             return True
         if self.state == CircuitState.OPEN:
             # 检查是否超过恢复时间
-            if self.last_failure_time and \
-               (time.time() - self.last_failure_time) >= self.recovery_timeout:
+            if (
+                self.last_failure_time
+                and (time.time() - self.last_failure_time) >= self.recovery_timeout
+            ):
                 self.state = CircuitState.HALF_OPEN
                 return True
             return False
@@ -120,17 +124,13 @@ class FullCompactor:
         )
         self._prompt = self.config.prompt_template or DEFAULT_COMPACTION_PROMPT
 
-    def should_compact(
-        self, current_tokens: int, model_window: int
-    ) -> bool:
+    def should_compact(self, current_tokens: int, model_window: int) -> bool:
         """判断是否需要全量压缩。"""
         if not self.circuit_breaker.can_attempt():
             return False
         return (current_tokens / model_window) >= self.config.trigger_fraction
 
-    def compact(
-        self, messages: list[BaseMessage]
-    ) -> tuple[bool, str, list[BaseMessage]]:
+    def compact(self, messages: list[BaseMessage]) -> tuple[bool, str, list[BaseMessage]]:
         """执行全量压缩。
 
         Returns:
@@ -161,7 +161,9 @@ class FullCompactor:
 
         try:
             response = self.model.invoke([HumanMessage(content=prompt)])
-            summary = response.content if isinstance(response.content, str) else str(response.content)
+            summary = (
+                response.content if isinstance(response.content, str) else str(response.content)
+            )
 
             # 验证压缩结果
             if not summary or len(summary) < 10:

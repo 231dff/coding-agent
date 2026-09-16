@@ -1,3 +1,10 @@
+---
+name: codebase-design_DEEPENING
+category: 设计与研究
+description: codebase-design 子文档：深化阶段细则。内部引用，不单独触发。
+hidden: true
+---
+
 # Deepening
 
 How to deepen a cluster of shallow modules safely, given its dependencies. Assumes the vocabulary in [SKILL.md](SKILL.md): **module**, **interface**, **seam**, **adapter**.

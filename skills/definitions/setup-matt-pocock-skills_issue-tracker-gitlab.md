@@ -1,3 +1,11 @@
+---
+name: setup-matt-pocock-skills_issue-tracker-gitlab
+category: 用户主动触发
+description: setup-matt-pocock-skills 子文档：GitLab tracker 配置。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Issue tracker: GitLab
 
 Issues and specs for this repo live as GitLab issues. Use the [`glab`](https://gitlab.com/gitlab-org/cli) CLI for all operations.

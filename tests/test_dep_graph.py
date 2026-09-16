@@ -1,7 +1,9 @@
 """Day 9: 依赖图测试。"""
+
 import pytest
-from codebase.parser import CodeParser
+
 from codebase.dep_graph import DependencyGraph
+from codebase.parser import CodeParser
 
 
 @pytest.fixture

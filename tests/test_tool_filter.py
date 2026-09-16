@@ -1,7 +1,8 @@
 """Day 22: 工具过滤测试。"""
-import pytest
+
 from langchain_core.tools import tool
-from middleware.tool_filter import ToolFilterMiddleware, ToolFilterConfig
+
+from middleware.tool_filter import ToolFilterConfig, ToolFilterMiddleware
 
 
 @tool
@@ -40,14 +41,17 @@ def test_filter_detects_loaded_skill():
     )
     # 构造一条 load_skill 的 tool call
     from langchain_core.messages import AIMessage
+
     msg = AIMessage(
         content="",
-        tool_calls=[{
-            "name": "load_skill",
-            "args": {"skill_name": "python_testing"},
-            "id": "call-1",
-            "type": "tool_call",
-        }],
+        tool_calls=[
+            {
+                "name": "load_skill",
+                "args": {"skill_name": "python_testing"},
+                "id": "call-1",
+                "type": "tool_call",
+            }
+        ],
     )
     active = mw._extract_active_skills([msg])
     assert "python_testing" in active

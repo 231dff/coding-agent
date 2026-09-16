@@ -1,3 +1,11 @@
+---
+name: teach_RESOURCES-FORMAT
+category: 用户主动触发
+description: teach 子文档：RESOURCES 格式。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # RESOURCES.md Format
 
 `RESOURCES.md` is the curated set of trusted sources for this topic. Knowledge for explainers should be drawn from here, not from parametric guesses. Wisdom comes from the communities listed here.

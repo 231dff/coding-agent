@@ -9,11 +9,10 @@
 """
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from agent.state import PlanningState
-
 
 PLANNING_SYSTEM_PROMPT = """你是一个任务规划器。将用户需求拆解为可执行的步骤。
 
@@ -58,15 +57,12 @@ def build_planning_graph(agent, checkpointer):
         return {"messages": [AIMessage(content="开始探索代码库...")]}
 
     def generate_plan(state: PlanningState) -> dict:
-        """生成执行计划。"""
-        requirement = state.get("requirement", "")
-        prompt = (
-            f"{PLANNING_SYSTEM_PROMPT}\n\n"
-            f"用户需求: {requirement}\n\n"
-            f"请输出执行计划。"
-        )
-        # 实际调用 LLM 生成 plan
-        # 这里简化为占位
+        """生成执行计划。
+
+        TODO: 实际调用 LLM 时，用 state.get("requirement", "") 组装
+              PLANNING_SYSTEM_PROMPT + requirement 一起发给模型。
+              这里简化为占位。
+        """
         plan = ["read_file", "edit_file", "execute"]
         return {"plan": plan, "current_step": 0}
 
@@ -78,15 +74,12 @@ def build_planning_graph(agent, checkpointer):
             return {"should_end": True}
 
         step = plan[step_idx]
-        # 调用 Agent 执行该步骤
-        # 实际实现: agent.invoke(...)
         result = f"已完成步骤 {step_idx + 1}: {step}"
         results = state.get("step_results", []) + [result]
         return {"step_results": results, "messages": [AIMessage(content=result)]}
 
     def validate_step(state: PlanningState) -> dict:
         """验证步骤结果。"""
-        # 简化：总是通过
         return {"current_step": state.get("current_step", 0) + 1}
 
     def route_after_validate(state: PlanningState) -> str:
@@ -127,5 +120,5 @@ def build_planning_graph(agent, checkpointer):
 
     return graph.compile(
         checkpointer=checkpointer,
-        interrupt_after=["generate_plan"],  # 计划生成后暂停，等待人工确认
+        interrupt_after=["generate_plan"],
     )

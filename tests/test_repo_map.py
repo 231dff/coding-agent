@@ -1,5 +1,7 @@
 """Day 7: Repo Map 测试。"""
+
 import pytest
+
 from codebase.parser import CodeParser
 from codebase.repo_map import RepoMapBuilder
 
@@ -7,9 +9,7 @@ from codebase.repo_map import RepoMapBuilder
 @pytest.fixture
 def map_project(tmp_path):
     for i in range(5):
-        (tmp_path / f"mod{i}.py").write_text(
-            f"def func_{i}():\n    return {i}\n"
-        )
+        (tmp_path / f"mod{i}.py").write_text(f"def func_{i}():\n    return {i}\n")
     return tmp_path
 
 

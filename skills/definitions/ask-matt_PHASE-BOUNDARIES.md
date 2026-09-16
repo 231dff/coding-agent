@@ -1,3 +1,11 @@
+---
+name: ask-matt_PHASE-BOUNDARIES
+category: 用户主动触发
+description: ask-matt 子文档：阶段边界。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Phase boundaries
 
 A **phase** is a chunk of work inside a session: the grilling, the implementation, the QA. The definition is fuzzy on purpose: a phase ends when you think *"ok, we're done with that"*.

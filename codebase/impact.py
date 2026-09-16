@@ -3,6 +3,7 @@
 结合文件级依赖图和符号级调用图，计算修改某个符号的全部影响集。
 用于编辑前的接口一致性检查。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ from codebase.dep_graph import DependencyGraph
 @dataclass
 class ImpactReport:
     """变更影响报告。"""
+
     symbol: str
     definition: list[tuple[str, str, int]] = field(default_factory=list)
     direct_callers: list[str] = field(default_factory=list)
@@ -60,9 +62,7 @@ class ImpactAnalyzer:
         self.call_graph = call_graph
         self.dep_graph = dep_graph
 
-    def analyze(
-        self, symbol_name: str, max_depth: int = 3
-    ) -> ImpactReport:
+    def analyze(self, symbol_name: str, max_depth: int = 3) -> ImpactReport:
         """分析修改指定符号的影响。
 
         Args:
@@ -111,15 +111,14 @@ class ImpactAnalyzer:
 
         report.affected_files = sorted(affected)
         report.total_impact = (
-            len(report.definition)
-            + len(report.direct_callers)
-            + len(report.transitive_callers)
+            len(report.definition) + len(report.direct_callers) + len(report.transitive_callers)
         )
 
         return report
 
 
 # ---- LangChain 工具封装 ----
+
 
 def create_impact_tool(analyzer: ImpactAnalyzer):
     """将 ImpactAnalyzer 封装为 LangChain 工具。"""

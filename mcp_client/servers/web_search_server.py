@@ -1,4 +1,5 @@
 """Day 25: Web 搜索 MCP Server。"""
+
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("WebSearch")
@@ -13,6 +14,7 @@ def web_search(query: str, max_results: int = 5) -> str:
         max_results: 最大结果数。
     """
     import httpx
+
     # 使用 DuckDuckGo 的免费 API
     try:
         resp = httpx.get(

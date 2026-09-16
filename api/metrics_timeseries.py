@@ -3,6 +3,7 @@
 数据源：observability/metrics_store.MetricsStore（SQLite）。
 mock 模式返回模拟数据；real 模式返回真实数据（无 mock 兜底）。
 """
+
 from __future__ import annotations
 
 import os
@@ -16,7 +17,6 @@ from pydantic import BaseModel
 
 from observability.metrics_store import MetricsStore
 
-
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 AGENT_MODE = os.getenv("AGENT_MODE", "mock").lower()
@@ -25,6 +25,7 @@ AGENT_MODE = os.getenv("AGENT_MODE", "mock").lower()
 # ============================================================
 # 数据模型
 # ============================================================
+
 
 class MetricPoint(BaseModel):
     timestamp: float
@@ -96,6 +97,7 @@ _RANGE_CONFIG: dict[str, tuple[int, int]] = {
 # Mock 数据生成
 # ============================================================
 
+
 def _generate_mock_series(
     range_seconds: int,
     bucket_seconds: int,
@@ -125,19 +127,21 @@ def _generate_mock_series(
             + cache_write * 2.0 / 1e6
         )
 
-        points.append(MetricPoint(
-            timestamp=ts,
-            llm_calls=llm_calls,
-            tool_calls=tool_calls,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_read_tokens=cache_read,
-            cache_write_tokens=cache_write,
-            cost_usd=round(cost, 6),
-            avg_latency_ms=round(random.uniform(800, 3500), 1),
-            tool_breakdown={},
-            compaction_layers={},
-        ))
+        points.append(
+            MetricPoint(
+                timestamp=ts,
+                llm_calls=llm_calls,
+                tool_calls=tool_calls,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
+                cost_usd=round(cost, 6),
+                avg_latency_ms=round(random.uniform(800, 3500), 1),
+                tool_breakdown={},
+                compaction_layers={},
+            )
+        )
 
     return points
 
@@ -145,6 +149,7 @@ def _generate_mock_series(
 # ============================================================
 # 汇总
 # ============================================================
+
 
 def _summarize(points: list[MetricPoint]) -> SummaryStats:
     if not points:
@@ -169,9 +174,7 @@ def _summarize(points: list[MetricPoint]) -> SummaryStats:
         total_output_tokens=sum(p.output_tokens for p in points),
         total_cache_read_tokens=total_cache_read,
         total_cost_usd=round(sum(p.cost_usd for p in points), 4),
-        avg_latency_ms=round(
-            sum(p.avg_latency_ms for p in points) / len(points), 1
-        ),
+        avg_latency_ms=round(sum(p.avg_latency_ms for p in points) / len(points), 1),
         cache_hit_rate=(
             round(total_cache_read / (total_input + total_cache_read), 3)
             if (total_input + total_cache_read) > 0
@@ -183,6 +186,7 @@ def _summarize(points: list[MetricPoint]) -> SummaryStats:
 # ============================================================
 # 路由
 # ============================================================
+
 
 @router.get("/timeseries", response_model=TimeseriesResponse)
 async def get_timeseries(

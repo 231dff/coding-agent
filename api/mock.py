@@ -5,13 +5,14 @@
 2. 集成测试中的确定性输入
 3. 演示和 E2E 测试
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import time
 import uuid
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 
 def sse(event: str, data: dict) -> str:
@@ -72,20 +73,26 @@ async def _scenario_default(session_id: str, message: str) -> AsyncIterator[str]
         await asyncio.sleep(0.05)
 
     tool_call_id = f"call_{uuid.uuid4().hex[:8]}"
-    yield sse("tool_start", {
-        "tool_call_id": tool_call_id,
-        "tool_name": "read_file",
-        "args": {"path": "calc.py"},
-        "timestamp": time.time(),
-    })
+    yield sse(
+        "tool_start",
+        {
+            "tool_call_id": tool_call_id,
+            "tool_name": "read_file",
+            "args": {"path": "calc.py"},
+            "timestamp": time.time(),
+        },
+    )
     await asyncio.sleep(0.3)
 
-    yield sse("tool_end", {
-        "tool_call_id": tool_call_id,
-        "tool_name": "read_file",
-        "output": "def add(a, b):\n    return a + b\n",
-        "timestamp": time.time(),
-    })
+    yield sse(
+        "tool_end",
+        {
+            "tool_call_id": tool_call_id,
+            "tool_name": "read_file",
+            "output": "def add(a, b):\n    return a + b\n",
+            "timestamp": time.time(),
+        },
+    )
 
     for token in ["\n\n", "文件里", "有一个 `add` 函数，", "实现是正确的。"]:
         yield sse("token", {"content": token, "session_id": session_id})
@@ -96,7 +103,14 @@ async def _scenario_default(session_id: str, message: str) -> AsyncIterator[str]
 
 async def _scenario_code(session_id: str, message: str) -> AsyncIterator[str]:
     """输出含代码块的回复。"""
-    for token in ["这是", "修复方案：", "\n\n```python\n", "def add(a, b):\n", "    return a + b\n", "```\n\n"]:
+    for token in [
+        "这是",
+        "修复方案：",
+        "\n\n```python\n",
+        "def add(a, b):\n",
+        "    return a + b\n",
+        "```\n\n",
+    ]:
         yield sse("token", {"content": token, "session_id": session_id})
         await asyncio.sleep(0.08)
     yield sse("done", {"session_id": session_id})
@@ -110,25 +124,35 @@ async def _scenario_multi_tool(session_id: str, message: str) -> AsyncIterator[s
     tools = [
         ("analyze_impact", {"symbol_name": "process"}, "发现 3 个调用方"),
         ("read_file", {"path": "service.py"}, "def process(data): ..."),
-        ("edit_file", {"path": "service.py", "old_string": "process", "new_string": "handle"}, "OK: 已编辑"),
+        (
+            "edit_file",
+            {"path": "service.py", "old_string": "process", "new_string": "handle"},
+            "OK: 已编辑",
+        ),
         ("run_tests", {"command": "pytest"}, "5 passed"),
     ]
 
     for tool_name, args, output in tools:
         call_id = f"call_{uuid.uuid4().hex[:8]}"
-        yield sse("tool_start", {
-            "tool_call_id": call_id,
-            "tool_name": tool_name,
-            "args": args,
-            "timestamp": time.time(),
-        })
+        yield sse(
+            "tool_start",
+            {
+                "tool_call_id": call_id,
+                "tool_name": tool_name,
+                "args": args,
+                "timestamp": time.time(),
+            },
+        )
         await asyncio.sleep(0.4)
-        yield sse("tool_end", {
-            "tool_call_id": call_id,
-            "tool_name": tool_name,
-            "output": output,
-            "timestamp": time.time(),
-        })
+        yield sse(
+            "tool_end",
+            {
+                "tool_call_id": call_id,
+                "tool_name": tool_name,
+                "output": output,
+                "timestamp": time.time(),
+            },
+        )
         await asyncio.sleep(0.1)
 
     for token in ["所有调用方", "已同步修改，", "测试通过。"]:
@@ -143,17 +167,23 @@ async def _scenario_error(session_id: str) -> AsyncIterator[str]:
     yield sse("token", {"content": "开始执行...", "session_id": session_id})
     await asyncio.sleep(0.2)
 
-    yield sse("error", {
-        "source": "tool",
-        "tool_name": "execute",
-        "message": "Command failed: pytest returned exit code 1",
-    })
+    yield sse(
+        "error",
+        {
+            "source": "tool",
+            "tool_name": "execute",
+            "message": "Command failed: pytest returned exit code 1",
+        },
+    )
     await asyncio.sleep(0.2)
 
-    yield sse("error", {
-        "source": "server",
-        "message": "上下文压缩熔断触发（连续 3 次失败）",
-    })
+    yield sse(
+        "error",
+        {
+            "source": "server",
+            "message": "上下文压缩熔断触发（连续 3 次失败）",
+        },
+    )
 
     yield sse("done", {"session_id": session_id})
 
@@ -178,10 +208,13 @@ async def _scenario_approval(session_id: str, message: str) -> AsyncIterator[str
     """
     from api.approval import approval_manager
 
-    yield sse("token", {
-        "content": "我需要执行一个命令来验证测试。",
-        "session_id": session_id,
-    })
+    yield sse(
+        "token",
+        {
+            "content": "我需要执行一个命令来验证测试。",
+            "session_id": session_id,
+        },
+    )
     await asyncio.sleep(0.3)
 
     tool_call_id = f"call_{uuid.uuid4().hex[:8]}"
@@ -200,29 +233,38 @@ async def _scenario_approval(session_id: str, message: str) -> AsyncIterator[str
     )
 
     # 发出审批事件
-    yield sse("approval_required", {
-        "session_id": session_id,
-        "approval_id": approval.id,
-        "tool_call_id": tool_call_id,
-        "tool_name": "execute",
-        "args": approval.args,
-        "reason": approval.reason,
-        "thread_id": thread_id,
-        "checkpoint_id": checkpoint_id,
-        "timestamp": time.time(),
-    })
+    yield sse(
+        "approval_required",
+        {
+            "session_id": session_id,
+            "approval_id": approval.id,
+            "tool_call_id": tool_call_id,
+            "tool_name": "execute",
+            "args": approval.args,
+            "reason": approval.reason,
+            "thread_id": thread_id,
+            "checkpoint_id": checkpoint_id,
+            "timestamp": time.time(),
+        },
+    )
 
     # 如果是危险命令，已经被自动拒绝，直接走拒绝路径
     if approval.decision == "reject" and approval.decided_by == "system":
-        yield sse("error", {
-            "source": "tool",
-            "tool_name": "execute",
-            "message": f"操作被自动拒绝: {approval.reason}",
-        })
-        yield sse("token", {
-            "content": "\n\n该操作被系统自动拒绝。",
-            "session_id": session_id,
-        })
+        yield sse(
+            "error",
+            {
+                "source": "tool",
+                "tool_name": "execute",
+                "message": f"操作被自动拒绝: {approval.reason}",
+            },
+        )
+        yield sse(
+            "token",
+            {
+                "content": "\n\n该操作被系统自动拒绝。",
+                "session_id": session_id,
+            },
+        )
         yield sse("done", {"session_id": session_id})
         return
 
@@ -230,53 +272,71 @@ async def _scenario_approval(session_id: str, message: str) -> AsyncIterator[str
     resolved = await approval_manager.wait_decision(approval.id)
 
     if resolved.decision == "reject":
-        yield sse("error", {
-            "source": "tool",
-            "tool_name": "execute",
-            "message": f"用户拒绝执行: {resolved.reason}",
-        })
-        yield sse("token", {
-            "content": "\n\n好的，已跳过该命令。",
-            "session_id": session_id,
-        })
+        yield sse(
+            "error",
+            {
+                "source": "tool",
+                "tool_name": "execute",
+                "message": f"用户拒绝执行: {resolved.reason}",
+            },
+        )
+        yield sse(
+            "token",
+            {
+                "content": "\n\n好的，已跳过该命令。",
+                "session_id": session_id,
+            },
+        )
         yield sse("done", {"session_id": session_id})
         return
 
     # 批准（或编辑后批准）
     final_args = resolved.edited_args or approval.args
-    yield sse("token", {
-        "content": "\n\n已批准，开始执行...",
-        "session_id": session_id,
-    })
+    yield sse(
+        "token",
+        {
+            "content": "\n\n已批准，开始执行...",
+            "session_id": session_id,
+        },
+    )
     await asyncio.sleep(0.2)
 
-    yield sse("tool_start", {
-        "tool_call_id": tool_call_id,
-        "tool_name": "execute",
-        "args": final_args,
-        "timestamp": time.time(),
-    })
+    yield sse(
+        "tool_start",
+        {
+            "tool_call_id": tool_call_id,
+            "tool_name": "execute",
+            "args": final_args,
+            "timestamp": time.time(),
+        },
+    )
     await asyncio.sleep(0.6)
 
-    yield sse("tool_end", {
-        "tool_call_id": tool_call_id,
-        "tool_name": "execute",
-        "output": (
-            "============================= test session starts =============================\n"
-            "collected 5 items\n\n"
-            "tests/test_calc.py::test_add PASSED                                       [ 20%]\n"
-            "tests/test_calc.py::test_sub PASSED                                       [ 40%]\n"
-            "tests/test_calc.py::test_mul PASSED                                       [ 60%]\n"
-            "tests/test_calc.py::test_div PASSED                                       [ 80%]\n"
-            "tests/test_calc.py::test_edge PASSED                                      [100%]\n\n"
-            "\x1b[32m5 passed in 0.42s\x1b[0m"
-        ),
-        "timestamp": time.time(),
-    })
+    yield sse(
+        "tool_end",
+        {
+            "tool_call_id": tool_call_id,
+            "tool_name": "execute",
+            "output": (
+                "============================= test session starts =============================\n"
+                "collected 5 items\n\n"
+                "tests/test_calc.py::test_add PASSED                                       [ 20%]\n"
+                "tests/test_calc.py::test_sub PASSED                                       [ 40%]\n"
+                "tests/test_calc.py::test_mul PASSED                                       [ 60%]\n"
+                "tests/test_calc.py::test_div PASSED                                       [ 80%]\n"
+                "tests/test_calc.py::test_edge PASSED                                      [100%]\n\n"
+                "\x1b[32m5 passed in 0.42s\x1b[0m"
+            ),
+            "timestamp": time.time(),
+        },
+    )
 
-    yield sse("token", {
-        "content": "\n\n测试全部通过，任务完成。",
-        "session_id": session_id,
-    })
+    yield sse(
+        "token",
+        {
+            "content": "\n\n测试全部通过，任务完成。",
+            "session_id": session_id,
+        },
+    )
 
     yield sse("done", {"session_id": session_id})

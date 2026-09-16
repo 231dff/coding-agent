@@ -4,18 +4,21 @@
 - 流式输出：减少首字节延迟
 - 工具预取：预测下一步
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
 class ParallelTask:
     """一个并行任务。"""
+
     name: str
     fn: Callable
     args: tuple = ()
@@ -25,6 +28,7 @@ class ParallelTask:
 @dataclass
 class ParallelResult:
     """并行执行结果。"""
+
     name: str
     result: Any
     duration_s: float
@@ -58,18 +62,22 @@ def run_parallel(
             start = time.time()
             try:
                 result = fut.result()
-                results.append(ParallelResult(
-                    name=task.name,
-                    result=result,
-                    duration_s=time.time() - start,
-                ))
+                results.append(
+                    ParallelResult(
+                        name=task.name,
+                        result=result,
+                        duration_s=time.time() - start,
+                    )
+                )
             except Exception as e:
-                results.append(ParallelResult(
-                    name=task.name,
-                    result=None,
-                    duration_s=time.time() - start,
-                    error=f"{type(e).__name__}: {e}",
-                ))
+                results.append(
+                    ParallelResult(
+                        name=task.name,
+                        result=None,
+                        duration_s=time.time() - start,
+                        error=f"{type(e).__name__}: {e}",
+                    )
+                )
 
     return results
 
@@ -79,6 +87,7 @@ async def run_parallel_async(
     timeout: float | None = None,
 ) -> list[ParallelResult]:
     """异步并行执行。用于 I/O 密集场景。"""
+
     async def _run_one(task: ParallelTask) -> ParallelResult:
         start = time.time()
         try:
@@ -106,6 +115,7 @@ async def run_parallel_async(
 
 
 # ---------- 延迟优化 ----------
+
 
 class ToolPrefetcher:
     """工具预取器。

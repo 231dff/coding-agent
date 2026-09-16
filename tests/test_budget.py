@@ -1,6 +1,8 @@
 """Day 17: 预算控制测试。"""
+
 import pytest
-from context.budget import ToolResultBudget, BudgetConfig
+
+from context.budget import BudgetConfig, ToolResultBudget
 
 
 @pytest.fixture

@@ -1,4 +1,5 @@
 """Day 25: 数据库查询 MCP Server（只读）。"""
+
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("Database")
@@ -25,6 +26,7 @@ def query_readonly(db_path: str, sql: str) -> str:
             return f"ERROR: 禁止的 SQL 关键词: {kw}"
 
     import sqlite3
+
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row

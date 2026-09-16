@@ -1,7 +1,8 @@
 """Day 16: 上下文装配测试。"""
-import pytest
+
+from langchain_core.messages import HumanMessage
+
 from context.assembly import ContextAssembler
-from langchain_core.messages import HumanMessage, AIMessage
 
 
 def test_stable_prefix_unchanged():

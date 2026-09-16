@@ -11,6 +11,7 @@
 
 API Key 跨项目共享，避免每次进新项目都输 key。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

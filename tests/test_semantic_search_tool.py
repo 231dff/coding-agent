@@ -1,8 +1,10 @@
 """状态感知的 semantic_search 工具测试。"""
+
 import pytest
-from codebase.parser import CodeParser
-from codebase.indexer import CodeIndexer, create_search_tool, create_index_status_tool
+
 from codebase.background_indexer import BackgroundIndexer
+from codebase.indexer import CodeIndexer, create_index_status_tool, create_search_tool
+from codebase.parser import CodeParser
 
 
 @pytest.fixture

@@ -5,12 +5,12 @@
         --source D:/Github-agent/mattpocock-skills/skills \
         --target skills/definitions
 """
+
 from __future__ import annotations
 
 import argparse
 import re
 from pathlib import Path
-
 
 # 技能名 → 触发条件映射（人工维护，覆盖常用技能）
 TRIGGER_MAP: dict[str, str] = {
@@ -86,11 +86,7 @@ def convert_to_project_format(skill: dict, category: str) -> str:
     trigger = trigger.replace(":", "：")
 
     frontmatter = (
-        f"---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        f"trigger: {trigger}\n"
-        f"category: {category}\n"
+        f"---\nname: {name}\ndescription: {description}\ntrigger: {trigger}\ncategory: {category}\n"
     )
 
     # 如果有 disable-model-invocation，加上标记
@@ -167,4 +163,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

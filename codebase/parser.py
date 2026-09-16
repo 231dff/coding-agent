@@ -3,18 +3,17 @@
 封装 tree-sitter 的 Language/Parser API（0.23+ 版本），
 提供文件级和目录级的 AST 解析能力，支持增量解析。
 """
+
 from __future__ import annotations
 
 import os
-import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
-
-from tree_sitter import Language, Parser, Tree, Node, Query, QueryCursor
 
 # 语言加载（0.23+ API：Language 接收 language() 的返回值）
 import tree_sitter_python as tspython
+from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
 
 PY_LANGUAGE = Language(tspython.language())
 
@@ -35,23 +34,25 @@ def _get_py_query() -> Query:
 @dataclass
 class ParsedFile:
     """单个文件的解析结果。"""
-    path: str                    # 相对路径
-    source: bytes                # 原始字节
-    tree: Tree                   # AST
+
+    path: str  # 相对路径
+    source: bytes  # 原始字节
+    tree: Tree  # AST
     language: str = "python"
-    mtime: float = 0.0           # 用于增量解析
-    symbols: list["Symbol"] = field(default_factory=list)
+    mtime: float = 0.0  # 用于增量解析
+    symbols: list[Symbol] = field(default_factory=list)
 
 
 @dataclass
 class Symbol:
     """一个代码符号（函数/类/方法/常量）。"""
+
     name: str
-    kind: str                    # function / class / method / constant
-    file: str                    # 相对路径
-    start_line: int              # 1-based
-    end_line: int                # 1-based
-    signature: str = ""          # 只含签名的文本
+    kind: str  # function / class / method / constant
+    file: str  # 相对路径
+    start_line: int  # 1-based
+    end_line: int  # 1-based
+    signature: str = ""  # 只含签名的文本
 
 
 class CodeParser:
@@ -59,9 +60,19 @@ class CodeParser:
 
     # 默认忽略的目录
     IGNORE_DIRS = {
-        ".git", "__pycache__", ".venv", "venv", "node_modules",
-        ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
-        ".egg-info", ".idea", ".vscode",
+        ".git",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "node_modules",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        "dist",
+        "build",
+        ".egg-info",
+        ".idea",
+        ".vscode",
     }
 
     def __init__(self, workspace: str | Path, extensions: set[str] | None = None):
@@ -157,14 +168,16 @@ class CodeParser:
                 end_line = def_node.end_point[0] + 1
                 signature = self._extract_signature(def_node, parsed.source)
 
-                symbols.append(Symbol(
-                    name=name,
-                    kind=kind,
-                    file=parsed.path,
-                    start_line=start_line,
-                    end_line=end_line,
-                    signature=signature,
-                ))
+                symbols.append(
+                    Symbol(
+                        name=name,
+                        kind=kind,
+                        file=parsed.path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        signature=signature,
+                    )
+                )
 
         return symbols
 
@@ -192,10 +205,10 @@ class CodeParser:
         # 找到函数体子节点，签名 = 定义开始到 body 之前
         body = def_node.child_by_field_name("body")
         if body is not None:
-            sig_bytes = source[def_node.start_byte:body.start_byte]
+            sig_bytes = source[def_node.start_byte : body.start_byte]
         else:
             # 常量赋值等没有 body，取整行
-            sig_bytes = source[def_node.start_byte:def_node.end_byte]
+            sig_bytes = source[def_node.start_byte : def_node.end_byte]
 
         sig = sig_bytes.decode("utf-8").strip()
         # 压缩多行签名为单行

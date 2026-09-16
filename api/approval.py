@@ -5,13 +5,13 @@
 2. 记录审批历史
 3. 与 SSE 流协同：流等待用户决策，另一路 HTTP 请求注入决策
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
-
 
 # 敏感工具：需要审批才能执行
 SENSITIVE_TOOLS = {
@@ -40,6 +40,7 @@ FORBIDDEN_PATTERNS = [
 @dataclass
 class PendingApproval:
     """一条待审批记录。"""
+
     id: str
     session_id: str
     tool_call_id: str
@@ -169,7 +170,7 @@ class ApprovalManager:
                 approval.decision_event.wait(),
                 timeout=self.timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             approval.resolve("reject", by="system")
             self._record_history(approval)
             async with self._lock:
@@ -198,17 +199,19 @@ class ApprovalManager:
         return list(reversed(items))[:limit]
 
     def _record_history(self, approval: PendingApproval) -> None:
-        self._history.append({
-            "id": approval.id,
-            "session_id": approval.session_id,
-            "tool_call_id": approval.tool_call_id,
-            "tool_name": approval.tool_name,
-            "args": approval.args,
-            "decision": approval.decision or "pending",
-            "edited_args": approval.edited_args,
-            "decided_at": time.time(),
-            "decided_by": approval.decided_by,
-        })
+        self._history.append(
+            {
+                "id": approval.id,
+                "session_id": approval.session_id,
+                "tool_call_id": approval.tool_call_id,
+                "tool_name": approval.tool_name,
+                "args": approval.args,
+                "decision": approval.decision or "pending",
+                "edited_args": approval.edited_args,
+                "decided_at": time.time(),
+                "decided_by": approval.decided_by,
+            }
+        )
 
     def _is_forbidden(self, tool_name: str, args: dict) -> bool:
         if tool_name != "execute":

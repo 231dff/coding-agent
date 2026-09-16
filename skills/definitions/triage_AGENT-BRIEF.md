@@ -1,3 +1,11 @@
+---
+name: triage_AGENT-BRIEF
+category: 用户主动触发
+description: triage 子文档：agent brief 格式。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Writing Agent Briefs
 
 An agent brief is a structured comment posted on a GitHub issue or PR when it moves to `ready-for-agent`. It is the authoritative specification that an AFK agent will work from. The original body and discussion are context: the agent brief is the contract.

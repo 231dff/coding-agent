@@ -1,10 +1,15 @@
 """Day 2-3: 文件工具单元测试。"""
-import tempfile
-from pathlib import Path
+
 import pytest
 
 from tools.file_ops import (
-    set_workspace, read_file, write_file, edit_file, glob_files, grep_search, ls_dir,
+    edit_file,
+    glob_files,
+    grep_search,
+    ls_dir,
+    read_file,
+    set_workspace,
+    write_file,
 )
 
 
@@ -35,30 +40,36 @@ def test_write_file_creates_backup(workspace):
 
 
 def test_edit_file_unique(workspace):
-    result = edit_file.invoke({
-        "path": "hello.py",
-        "old_string": "def greet",
-        "new_string": "def say_hello",
-    })
+    result = edit_file.invoke(
+        {
+            "path": "hello.py",
+            "old_string": "def greet",
+            "new_string": "def say_hello",
+        }
+    )
     assert "OK" in result
     assert "say_hello" in (workspace / "hello.py").read_text()
 
 
 def test_edit_file_not_unique(workspace):
-    result = edit_file.invoke({
-        "path": "hello.py",
-        "old_string": "e",
-        "new_string": "X",
-    })
+    result = edit_file.invoke(
+        {
+            "path": "hello.py",
+            "old_string": "e",
+            "new_string": "X",
+        }
+    )
     assert "不唯一" in result or "ERROR" in result
 
 
 def test_edit_file_not_found(workspace):
-    result = edit_file.invoke({
-        "path": "hello.py",
-        "old_string": "nonexistent_xyz",
-        "new_string": "X",
-    })
+    result = edit_file.invoke(
+        {
+            "path": "hello.py",
+            "old_string": "nonexistent_xyz",
+            "new_string": "X",
+        }
+    )
     assert "ERROR" in result
 
 

@@ -1,10 +1,12 @@
 """Day 14: 依赖检查中间件测试。"""
+
 import pytest
-from codebase.parser import CodeParser
-from codebase.dep_graph import DependencyGraph
+
 from codebase.call_graph import CallGraph
+from codebase.dep_graph import DependencyGraph
 from codebase.impact import ImpactAnalyzer
-from middleware.dependency_check import DependencyCheckMiddleware, DependencyCheckConfig
+from codebase.parser import CodeParser
+from middleware.dependency_check import DependencyCheckMiddleware
 
 
 @pytest.fixture

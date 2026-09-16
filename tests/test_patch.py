@@ -1,6 +1,8 @@
 """Day 15: Apply Patch 测试。"""
+
 import pytest
-from sandbox.patch import PatchParser, PatchApplier
+
+from sandbox.patch import PatchApplier, PatchParser
 
 
 @pytest.fixture

@@ -5,19 +5,20 @@
 - 压缩率从 ~30% 提升到 ~77%
 - 迭代次数减少，成功率提升
 """
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 
 @dataclass
 class SummaryEntry:
     """一条归档摘要记录。"""
+
     round_number: int
     timestamp: float
     intent: str
@@ -31,6 +32,7 @@ class SummaryEntry:
 @dataclass
 class SummarizeConfig:
     """摘要配置。"""
+
     every_n_rounds: int = 5
     trigger_fraction: float = 0.85
     keep_recent: int = 3

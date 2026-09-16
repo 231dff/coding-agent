@@ -2,14 +2,15 @@
 
 与 frontend/src/api/types.ts 严格对应，改动必须同步。
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel
 
 # ============ 请求 ============
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -25,6 +26,7 @@ class ApproveRequest(BaseModel):
 
 
 # ============ 响应 ============
+
 
 class SessionInfo(BaseModel):
     session_id: str
@@ -76,6 +78,7 @@ class PendingApprovalListResponse(BaseModel):
 
 # ============ SSE 事件 ============
 
+
 class TokenEvent(BaseModel):
     type: Literal["token"] = "token"
     content: str
@@ -122,7 +125,9 @@ class DoneEvent(BaseModel):
     type: Literal["done"] = "done"
     session_id: str
 
+
 # ============ 认证 ============
+
 
 class UserInfo(BaseModel):
     id: str
@@ -134,7 +139,8 @@ class UserInfo(BaseModel):
 
 class AuthConfigResponse(BaseModel):
     """前端初始化需要的认证配置。"""
-    mode: str                          # mock | oidc | disabled
+
+    mode: str  # mock | oidc | disabled
     require_auth: bool
     oidc_authority: str = ""
     oidc_client_id: str = ""

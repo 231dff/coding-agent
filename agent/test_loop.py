@@ -4,13 +4,14 @@
     执行测试 → 分析错误 → 生成修复 → 重新测试
     连续 N 次失败 → 中断，请求人工介入
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from agent.state import RepairState
@@ -19,6 +20,7 @@ from agent.state import RepairState
 @dataclass
 class TestResult:
     """测试执行结果。"""
+
     passed: bool
     total: int = 0
     failed: int = 0
@@ -75,7 +77,11 @@ def build_repair_graph(agent, sandbox_exec, checkpointer):
         return {
             "test_passed": test_result.passed,
             "test_output": output,
-            "messages": [AIMessage(content=f"测试结果: {'通过' if test_result.passed else '失败'}\n{output[:2000]}")],
+            "messages": [
+                AIMessage(
+                    content=f"测试结果: {'通过' if test_result.passed else '失败'}\n{output[:2000]}"
+                )
+            ],
         }
 
     def analyze_and_fix(state: RepairState) -> dict:

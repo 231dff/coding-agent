@@ -1,5 +1,7 @@
 """Day 21: 技能测试。"""
+
 import pytest
+
 from skills.registry import SkillRegistry
 
 

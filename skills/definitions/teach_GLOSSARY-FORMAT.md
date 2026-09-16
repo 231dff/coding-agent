@@ -1,3 +1,11 @@
+---
+name: teach_GLOSSARY-FORMAT
+category: 用户主动触发
+description: teach 子文档：GLOSSARY 格式。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # GLOSSARY.md Format
 
 `GLOSSARY.md` is the canonical language for this teaching workspace. All explainers, exercises, and learning records should adhere to its terminology. Building it is itself part of learning: compressing a concept into a tight definition is evidence the user understands it.

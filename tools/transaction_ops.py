@@ -3,15 +3,13 @@
 提供 begin_transaction / tx_edit / tx_commit / tx_rollback 四个工具。
 Agent 在多次编辑时显式使用事务。
 """
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 from langchain.tools import tool
 
 from sandbox.base import Sandbox
 from sandbox.transaction import EditTransaction
-
 
 _TX: EditTransaction | None = None
 _SANDBOX: Sandbox | None = None

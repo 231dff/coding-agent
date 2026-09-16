@@ -3,12 +3,12 @@
 不暴露时间戳/工具计数这些自动维护的状态（避免 Agent 手动篡改）。
 只暴露 TODO 的增删改查。
 """
+
 from __future__ import annotations
 
 from langchain.tools import tool
 
 from context.status_bar import AgentStatusBar
-
 
 _BAR: AgentStatusBar | None = None
 
@@ -75,6 +75,7 @@ def rewrite_todos(items: str) -> str:
     if _BAR is None:
         return "ERROR: 状态栏未初始化"
     import json
+
     try:
         parsed = json.loads(items)
     except json.JSONDecodeError as e:

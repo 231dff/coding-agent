@@ -2,9 +2,10 @@
 
 标记为 integration，本地无 Docker 时跳过。
 """
-import pytest
-from sandbox.docker_backend import DockerSandbox
 
+import pytest
+
+from sandbox.docker_backend import DockerSandbox
 
 pytestmark = pytest.mark.skipif(
     not __import__("shutil").which("docker"),

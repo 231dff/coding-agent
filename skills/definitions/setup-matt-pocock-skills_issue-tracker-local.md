@@ -1,3 +1,11 @@
+---
+name: setup-matt-pocock-skills_issue-tracker-local
+category: 用户主动触发
+description: setup-matt-pocock-skills 子文档：本地 tracker 配置。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Issue tracker: Local Markdown
 
 Issues and specs for this repo live as markdown files in `.scratch/`.

@@ -3,13 +3,13 @@
 参考 OpenAI Apply Patch 格式，支持结构化的多文件 diff。
 Agent 输出 patch 文本，集成层负责原子应用。
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
 
 
 class PatchOp(str, Enum):
@@ -21,15 +21,17 @@ class PatchOp(str, Enum):
 @dataclass
 class PatchHunk:
     """一个文件修改块。"""
+
     path: str
     op: PatchOp
-    new_content: str | None = None           # add
+    new_content: str | None = None  # add
     hunks: list[tuple[list[str], list[str]]] = field(default_factory=list)  # update
 
 
 @dataclass
 class ParseError(Exception):
     """Patch 格式错误。"""
+
     message: str
     line_no: int = 0
 
@@ -76,7 +78,7 @@ class PatchParser:
         if end_idx is None:
             raise ParseError("缺少 '*** End Patch' 标记")
 
-        body = lines[begin_idx + 1:end_idx]
+        body = lines[begin_idx + 1 : end_idx]
 
         # 分段解析
         hunks: list[PatchHunk] = []
@@ -274,6 +276,7 @@ class PatchApplier:
 
 
 # ---- LangChain 工具封装 ----
+
 
 def create_apply_patch_tool(workspace: str):
     """创建 apply_patch 工具。"""

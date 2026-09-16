@@ -3,12 +3,14 @@
 从 AST 中提取函数调用关系，构建符号粒度的有向图。
 用于精确的变更影响分析和接口一致性检查。
 """
+
 from __future__ import annotations
-from tree_sitter import QueryCursor
+
 from collections import defaultdict
 from dataclasses import dataclass
 
 import networkx as nx
+from tree_sitter import QueryCursor
 
 from codebase.parser import CodeParser, ParsedFile
 
@@ -16,8 +18,9 @@ from codebase.parser import CodeParser, ParsedFile
 @dataclass
 class CallEdge:
     """一条函数调用边。"""
-    caller: str          # "file::func_name"
-    callee: str          # "file::func_name" 或裸函数名
+
+    caller: str  # "file::func_name"
+    callee: str  # "file::func_name" 或裸函数名
     file: str
     line: int
 
@@ -39,9 +42,7 @@ class CallGraph:
         # 第一遍：建立符号定义索引
         for pf in parsed_files:
             for sym in pf.symbols:
-                self._def_index[sym.name].append(
-                    (sym.file, sym.kind, sym.start_line)
-                )
+                self._def_index[sym.name].append((sym.file, sym.kind, sym.start_line))
                 # 节点 = 文件::符号
                 node_id = f"{sym.file}::{sym.name}"
                 self.graph.add_node(
@@ -52,7 +53,6 @@ class CallGraph:
                 )
 
         # 第二遍：提取调用关系
-        from tree_sitter import QueryCursor
         from codebase.parser import _get_py_query
 
         query = _get_py_query()
@@ -91,12 +91,14 @@ class CallGraph:
             callee_id = f"{resolved[0]}::{callee_name}"
             line = call_node.start_point[0] + 1
 
-            self._edges.append(CallEdge(
-                caller=caller_id,
-                callee=callee_id,
-                file=parsed.path,
-                line=line,
-            ))
+            self._edges.append(
+                CallEdge(
+                    caller=caller_id,
+                    callee=callee_id,
+                    file=parsed.path,
+                    line=line,
+                )
+            )
             self.graph.add_edge(caller_id, callee_id)
 
     def _find_enclosing_function(self, node, parsed) -> object | None:
@@ -114,9 +116,7 @@ class CallGraph:
             cur = cur.parent
         return None
 
-    def _resolve_callee(
-        self, name: str, current_file: str
-    ) -> tuple[str, str, int] | None:
+    def _resolve_callee(self, name: str, current_file: str) -> tuple[str, str, int] | None:
         """将函数名解析到定义位置。
 
         优先当前文件，然后全局索引。
@@ -156,10 +156,7 @@ class CallGraph:
         if "::" in symbol:
             return [symbol] if symbol in self.graph else []
         # 裸名匹配
-        return [
-            n for n in self.graph.nodes()
-            if n.split("::")[-1] == symbol
-        ]
+        return [n for n in self.graph.nodes() if n.split("::")[-1] == symbol]
 
     def get_definition(self, symbol: str) -> list[tuple[str, str, int]]:
         """返回符号的定义位置列表。"""
@@ -167,6 +164,7 @@ class CallGraph:
 
 
 # ---- LangChain 工具封装 ----
+
 
 def create_call_tools(call_graph: CallGraph):
     """将 CallGraph 封装为 LangChain 工具。"""

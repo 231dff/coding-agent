@@ -5,6 +5,7 @@
 - models 列表仅作 UI 提示，不是白名单
 - 用户可以在向导中手动输入任意模型名，不做校验
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 class ProviderInfo:
     id: str
     name: str
-    langchain_provider: str              # openai / anthropic
+    langchain_provider: str  # openai / anthropic
     base_url: str = ""
     env_key: str = ""
     default_model: str = ""

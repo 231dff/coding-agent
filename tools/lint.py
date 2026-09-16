@@ -9,10 +9,10 @@
 - strict=True：详细报告所有不合规工具，抛 ValueError
 - strict=False：只统计一行，不刷屏
 """
+
 from __future__ import annotations
 
 from langchain.tools import BaseTool
-
 
 REQUIRED_SECTIONS = ["Boundary", "Params", "Returns", "Failures"]
 MAX_DESC_CHARS = 500  # 约 120 tokens
@@ -33,13 +33,9 @@ def lint_tool(tool: BaseTool) -> list[str]:
         boundary_start = desc.find("### Boundary")
         boundary_end = desc.find("###", boundary_start + 1)
         boundary_text = (
-            desc[boundary_start:boundary_end]
-            if boundary_end > 0
-            else desc[boundary_start:]
+            desc[boundary_start:boundary_end] if boundary_end > 0 else desc[boundary_start:]
         )
-        if not any(
-            kw in boundary_text for kw in ("NOT for", "不适用于", "不适用")
-        ):
+        if not any(kw in boundary_text for kw in ("NOT for", "不适用于", "不适用")):
             errors.append("Boundary 缺少反例（NOT for / 不适用）")
 
     # 3. 长度
@@ -50,9 +46,7 @@ def lint_tool(tool: BaseTool) -> list[str]:
     for line in desc.splitlines():
         stripped = line.strip()
         if stripped.startswith("## ") and not stripped.startswith("###"):
-            errors.append(
-                f"使用了二级标题 '##'（应使用 ### 或更低）: {stripped[:50]}"
-            )
+            errors.append(f"使用了二级标题 '##'（应使用 ### 或更低）: {stripped[:50]}")
             break
 
     return errors

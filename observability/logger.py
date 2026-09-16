@@ -3,6 +3,7 @@
 JSON lines 格式，便于日志聚合系统解析。
 也提供人类可读模式（开发环境）。
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,6 @@ from contextvars import ContextVar
 from typing import Any
 
 import structlog
-
 
 # 请求级上下文
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
@@ -99,6 +99,7 @@ def get_logger(name: str = "coding-agent"):
 # ============================================================
 # 便捷日志函数
 # ============================================================
+
 
 def log_llm_call(
     model: str,

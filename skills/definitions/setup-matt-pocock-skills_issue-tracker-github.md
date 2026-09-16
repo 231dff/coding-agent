@@ -1,3 +1,11 @@
+---
+name: setup-matt-pocock-skills_issue-tracker-github
+category: 用户主动触发
+description: setup-matt-pocock-skills 子文档：GitHub tracker 配置。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Issue tracker: GitHub
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.

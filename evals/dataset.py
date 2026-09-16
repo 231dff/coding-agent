@@ -7,12 +7,11 @@
 - 期望工具序列（可选）
 - token 预算
 """
+
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import yaml
 
@@ -20,11 +19,12 @@ import yaml
 @dataclass
 class EvalTask:
     """一个评测任务。"""
+
     id: str
-    category: str                # single_file | multi_file | bug_fix | dep_upgrade
+    category: str  # single_file | multi_file | bug_fix | dep_upgrade
     description: str
-    setup: dict[str, str]        # path -> content
-    success_assert: str          # Python 表达式，assert 语句
+    setup: dict[str, str]  # path -> content
+    success_assert: str  # Python 表达式，assert 语句
     expected_tools: list[str] = field(default_factory=list)
     token_budget: int = 10000
     max_iterations: int = 10
@@ -39,17 +39,19 @@ def load_tasks(directory: str | Path) -> list[EvalTask]:
     for yaml_file in sorted(directory.glob("*.yaml")):
         data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
         for item in data.get("tasks", []):
-            tasks.append(EvalTask(
-                id=item["id"],
-                category=item.get("category", data.get("category", "misc")),
-                description=item["description"],
-                setup=item.get("setup", {}),
-                success_assert=item["success_assert"],
-                expected_tools=item.get("expected_tools", []),
-                token_budget=item.get("token_budget", 10000),
-                max_iterations=item.get("max_iterations", 10),
-                tags=item.get("tags", []),
-            ))
+            tasks.append(
+                EvalTask(
+                    id=item["id"],
+                    category=item.get("category", data.get("category", "misc")),
+                    description=item["description"],
+                    setup=item.get("setup", {}),
+                    success_assert=item["success_assert"],
+                    expected_tools=item.get("expected_tools", []),
+                    token_budget=item.get("token_budget", 10000),
+                    max_iterations=item.get("max_iterations", 10),
+                    tags=item.get("tags", []),
+                )
+            )
 
     return tasks
 

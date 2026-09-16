@@ -1,4 +1,5 @@
 """Day 28: 报告生成。"""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from evals.runner import TaskResult
-from evals.scorer import SuiteScore, score_suite
+from evals.scorer import score_suite
 
 
 def generate_markdown_report(
@@ -32,24 +33,29 @@ def generate_markdown_report(
 
     if baseline:
         from evals.scorer import compare_baselines
-        passed, msgs = compare_baselines(results, baseline)
-        lines.extend([
-            "## 回归检查",
-            "",
-            f"状态: {'✓ 通过' if passed else '❌ 未通过'}",
-            "",
-            "```",
-            *msgs,
-            "```",
-            "",
-        ])
 
-    lines.extend([
-        "## 详细结果",
-        "",
-        "| 任务 | 类别 | 结果 | 耗时 | 输入 tokens | 工具调用 |",
-        "|------|------|------|------|-------------|----------|",
-    ])
+        passed, msgs = compare_baselines(results, baseline)
+        lines.extend(
+            [
+                "## 回归检查",
+                "",
+                f"状态: {'✓ 通过' if passed else '❌ 未通过'}",
+                "",
+                "```",
+                *msgs,
+                "```",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "## 详细结果",
+            "",
+            "| 任务 | 类别 | 结果 | 耗时 | 输入 tokens | 工具调用 |",
+            "|------|------|------|------|-------------|----------|",
+        ]
+    )
 
     for r in sorted(results, key=lambda x: (x.category, x.task_id)):
         status = "✓" if r.passed else "✗"

@@ -2,18 +2,20 @@
 
 采集每个阶段的耗时分布，定位瓶颈。
 """
+
 from __future__ import annotations
 
 import time
 from collections import defaultdict
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Iterator
 
 
 @dataclass
 class Span:
     """一个耗时区间。"""
+
     name: str
     duration_s: float
     parent: str | None = None
@@ -45,12 +47,14 @@ class Profiler:
         finally:
             _, start, meta = self._stack.pop()
             duration = time.perf_counter() - start
-            self.spans.append(Span(
-                name=name,
-                duration_s=duration,
-                parent=parent,
-                metadata=meta,
-            ))
+            self.spans.append(
+                Span(
+                    name=name,
+                    duration_s=duration,
+                    parent=parent,
+                    metadata=meta,
+                )
+            )
 
     def summary(self) -> dict:
         """按 span 名聚合统计。"""
@@ -77,9 +81,7 @@ class Profiler:
         """人类可读的摘要。"""
         summary = self.summary()
         lines = ["性能剖析摘要", "=" * 60]
-        for name, stats in sorted(
-            summary.items(), key=lambda x: -x[1]["total_s"]
-        ):
+        for name, stats in sorted(summary.items(), key=lambda x: -x[1]["total_s"]):
             lines.append(
                 f"{name:40s} "
                 f"count={stats['count']:4d} "

@@ -1,21 +1,22 @@
 """后台索引器测试。"""
+
 import time
+
 import pytest
-from codebase.parser import CodeParser
-from codebase.indexer import CodeIndexer
+
 from codebase.background_indexer import (
     BackgroundIndexer,
     IndexStatus,
 )
+from codebase.indexer import CodeIndexer
+from codebase.parser import CodeParser
 
 
 @pytest.fixture
 def project(tmp_path):
     for i in range(20):
         (tmp_path / f"mod{i}.py").write_text(
-            f"def func_{i}(x):\n"
-            f"    '''处理类型 {i} 的数据'''\n"
-            f"    return x + {i}\n"
+            f"def func_{i}(x):\n    '''处理类型 {i} 的数据'''\n    return x + {i}\n"
         )
     return tmp_path
 
@@ -95,7 +96,7 @@ def test_failure_captured(tmp_path, project):
 
     indexer = BrokenIndexer(parser, persist_dir=tmp_path / "idx")
     bg = BackgroundIndexer(parser, indexer)
-    bg.start(background=False)   # 同步执行便于断言
+    bg.start(background=False)  # 同步执行便于断言
     bg.wait(timeout=5)
 
     assert bg.status == IndexStatus.FAILED

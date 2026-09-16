@@ -1,3 +1,10 @@
+---
+name: domain-modeling_ADR-FORMAT
+category: 设计与研究
+description: domain-modeling 子文档：ADR 格式。内部引用，不单独触发。
+hidden: true
+---
+
 # ADR Format
 
 ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.

@@ -2,18 +2,18 @@
 
 低价值内容直接移除，不做摘要——对噪声做摘要只是在浪费 token。
 """
+
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
-from langchain_core.messages import BaseMessage, ToolMessage, AIMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 
 
 @dataclass
 class NoiseFilterConfig:
     """噪声过滤配置。"""
+
     # 未被后续引用的搜索结果保留轮数
     orphan_search_ttl: int = 3
     # 重复读取的文件内容（相同 path 的旧结果）

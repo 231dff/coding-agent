@@ -3,13 +3,13 @@
 首次在项目目录运行时自动创建，跨会话积累项目知识。
 强制条目简短、与行动相关、以约束表述。
 """
+
 from __future__ import annotations
 
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-
 
 DEFAULT_TEMPLATE = """# Agent Project Memory
 
@@ -33,9 +33,10 @@ DEFAULT_TEMPLATE = """# Agent Project Memory
 @dataclass
 class MemoryEntry:
     """一条记忆条目。"""
+
     section: str
     text: str
-    source: str = "agent"          # agent | user
+    source: str = "agent"  # agent | user
     created_at: float = field(default_factory=time.time)
     confidence: float = 1.0
 
@@ -123,10 +124,12 @@ class ProjectMemory:
             if line.startswith("## "):
                 current_section = line[3:].strip()
             elif line.startswith("- ") and current_section:
-                entries.append(MemoryEntry(
-                    section=current_section,
-                    text=line[2:].strip(),
-                ))
+                entries.append(
+                    MemoryEntry(
+                        section=current_section,
+                        text=line[2:].strip(),
+                    )
+                )
         return entries
 
     def _insert_entry(self, content: str, section: str, text: str) -> str:

@@ -1,3 +1,11 @@
+---
+name: improve-codebase-architecture_HTML-REPORT
+category: 设计与研究
+description: improve-codebase-architecture 子文档：HTML 报告格式。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # HTML Report Format
 
 The architectural review is rendered as a single self-contained HTML file in the OS temp directory. Tailwind and Mermaid both come from CDNs. Mermaid handles graph-shaped diagrams reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections). Mix the two: don't lean on Mermaid for everything, it'll start to look generic.

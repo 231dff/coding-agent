@@ -2,6 +2,7 @@
 
 分析前缀稳定性，识别导致缓存失效的变更。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,6 +14,7 @@ from observability.metrics import MetricsCollector
 @dataclass
 class CacheAnalysis:
     """缓存分析结果。"""
+
     total_calls: int
     cache_hit_rate: float
     total_input_tokens: int
@@ -55,17 +57,11 @@ class CacheTuner:
         total_input = self.metrics.input_tokens
 
         # 节省的成本 = 缓存读 token * (输入价 - 缓存读价)
-        savings = (
-            cached
-            * (self.pricing["input"] - self.pricing["cache_read"])
-            / 1_000_000
-        )
+        savings = cached * (self.pricing["input"] - self.pricing["cache_read"]) / 1_000_000
 
         recommendations = []
         if hit_rate < 0.5:
-            recommendations.append(
-                "缓存命中率低于 50%。检查系统提示或工具定义是否在每轮变化。"
-            )
+            recommendations.append("缓存命中率低于 50%。检查系统提示或工具定义是否在每轮变化。")
         if hit_rate < 0.2:
             recommendations.append(
                 "缓存命中率极低。可能原因："

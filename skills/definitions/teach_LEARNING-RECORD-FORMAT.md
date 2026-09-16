@@ -1,3 +1,11 @@
+---
+name: teach_LEARNING-RECORD-FORMAT
+category: 用户主动触发
+description: teach 子文档：学习记录格式。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Learning Record Format
 
 Learning records live in `./learning-records/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc. Create the directory lazily: only when the first record is written.

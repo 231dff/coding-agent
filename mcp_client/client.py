@@ -2,10 +2,10 @@
 
 统一管理多个 MCP Server 的连接和工具加载。
 """
+
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -14,6 +14,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 @dataclass
 class MCPConfig:
     """MCP 配置。"""
+
     servers: dict[str, dict] = field(default_factory=dict)
     # 示例：
     # {

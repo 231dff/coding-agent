@@ -1,3 +1,10 @@
+---
+name: prototype_LOGIC
+category: 实现与测试
+description: prototype 子文档：逻辑原型。内部引用，不单独触发。
+hidden: true
+---
+
 # Logic Prototype
 
 A single, self-contained HTML file (a **shareable demo**) that lets anyone drive a state model by clicking buttons. Use this when the question is about **business logic, state transitions, or data shape**: the kind of thing that looks reasonable on paper but only feels wrong once you push it through real cases.

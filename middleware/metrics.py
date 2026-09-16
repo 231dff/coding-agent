@@ -1,55 +1,95 @@
-"""指标采集中间件。
+"""指标采集中间件（异步写）。"""
 
-把每次 LLM 调用和工具调用的数据写入 MetricsStore（SQLite），
-并可选通过 on_metric 回调把事件推给上层（用于终端实时显示）。
-"""
 from __future__ import annotations
 
+import queue
+import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 
 from observability.metrics_store import MetricsStore
+
+# ============================================================
+# 异步 MetricsWriter
+# ============================================================
+
+
+class _AsyncMetricsWriter:
+    """后台线程批量写 MetricsStore。"""
+
+    def __init__(self, store: MetricsStore, batch_size: int = 50):
+        self.store = store
+        self.batch_size = batch_size
+        self._q: queue.Queue[tuple[str, dict]] = queue.Queue(maxsize=10000)
+        self._thread = threading.Thread(target=self._run, name="metrics-writer", daemon=True)
+        self._thread.start()
+
+    def submit_llm(self, **kw):
+        try:
+            self._q.put_nowait(("llm", kw))
+        except queue.Full:
+            pass
+
+    def submit_tool(self, **kw):
+        try:
+            self._q.put_nowait(("tool", kw))
+        except queue.Full:
+            pass
+
+    def _run(self):
+        while True:
+            item = self._q.get()
+            if item is None:
+                break
+            batch = [item]
+            # 尽量攒批
+            try:
+                while len(batch) < self.batch_size:
+                    batch.append(self._q.get_nowait())
+            except queue.Empty:
+                pass
+
+            try:
+                for kind, kw in batch:
+                    if kind == "llm":
+                        self.store.record_llm(**kw)
+                    else:
+                        self.store.record_tool(**kw)
+            except Exception:
+                pass
 
 
 # ============================================================
 # 消息解包
 # ============================================================
 
+
 def _unwrap_message(obj: Any) -> Any:
-    """从各种包装对象里取出真正的 AIMessage。"""
     if obj is None:
         return None
-
     if hasattr(obj, "content") and (
         hasattr(obj, "usage_metadata") or hasattr(obj, "response_metadata")
     ):
         return obj
-
     if hasattr(obj, "result"):
         inner = obj.result
         if isinstance(inner, list) and inner:
             return _unwrap_message(inner[0])
         if inner is not None:
             return _unwrap_message(inner)
-
     if isinstance(obj, list) and obj:
         return _unwrap_message(obj[0])
-
     if hasattr(obj, "messages"):
         msgs = obj.messages
         if isinstance(msgs, list) and msgs:
             return _unwrap_message(msgs[-1])
         if msgs is not None:
             return _unwrap_message(msgs)
-
     return obj
 
-
-# ============================================================
-# Usage / Model 提取
-# ============================================================
 
 def _empty_usage() -> dict:
     return {
@@ -61,12 +101,10 @@ def _empty_usage() -> dict:
 
 
 def _extract_usage(response: Any) -> dict:
-    """从 LangChain 响应里提取 token usage。"""
     if response is None:
         return _empty_usage()
 
     usage = getattr(response, "usage_metadata", None)
-
     if usage:
         if isinstance(usage, dict):
             details = usage.get("input_token_details") or {}
@@ -76,14 +114,11 @@ def _extract_usage(response: Any) -> dict:
                 "cache_read_tokens": details.get("cache_read", 0) or 0,
                 "cache_write_tokens": details.get("cache_creation", 0) or 0,
             }
-
         details = getattr(usage, "input_token_details", None) or {}
         return {
             "input_tokens": getattr(usage, "input_tokens", 0) or 0,
             "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-            "cache_read_tokens": (
-                details.get("cache_read", 0) if isinstance(details, dict) else 0
-            ),
+            "cache_read_tokens": (details.get("cache_read", 0) if isinstance(details, dict) else 0),
             "cache_write_tokens": (
                 details.get("cache_creation", 0) if isinstance(details, dict) else 0
             ),
@@ -92,7 +127,6 @@ def _extract_usage(response: Any) -> dict:
     meta = getattr(response, "response_metadata", {}) or {}
     token_usage = meta.get("token_usage") or meta.get("usage") or {}
     prompt_details = token_usage.get("prompt_tokens_details") or {}
-
     return {
         "input_tokens": token_usage.get("prompt_tokens", 0) or 0,
         "output_tokens": token_usage.get("completion_tokens", 0) or 0,
@@ -116,9 +150,8 @@ def _extract_model_name(response: Any, default: str = "unknown") -> str:
 # 中间件
 # ============================================================
 
-class MetricsMiddleware(AgentMiddleware):
-    """指标采集中间件。"""
 
+class MetricsMiddleware(AgentMiddleware):
     name: str = "MetricsMiddleware"
 
     def __init__(
@@ -133,8 +166,9 @@ class MetricsMiddleware(AgentMiddleware):
         self.default_model_name = model_name
         self.debug = debug
         self.on_metric = on_metric
+        self.writer = _AsyncMetricsWriter(self.store)
 
-    # ---------- 模型调用 ----------
+    # ---------- LLM ----------
 
     def wrap_model_call(self, request, handler):
         start = time.time()
@@ -148,10 +182,12 @@ class MetricsMiddleware(AgentMiddleware):
         self._record_llm(result, time.time() - start)
         return result
 
-    # ---------- 工具调用 ----------
+    # ---------- 工具 ----------
 
     def wrap_tool_call(self, request, handler):
-        tool_call = getattr(request, "tool_call", None) or request.get("tool_call")
+        tool_call = getattr(request, "tool_call", None) or (
+            request.get("tool_call") if hasattr(request, "get") else None
+        )
         tool_name = tool_call.get("name", "") if tool_call else ""
         start = time.time()
         try:
@@ -163,7 +199,9 @@ class MetricsMiddleware(AgentMiddleware):
             raise
 
     async def awrap_tool_call(self, request, handler):
-        tool_call = getattr(request, "tool_call", None) or request.get("tool_call")
+        tool_call = getattr(request, "tool_call", None) or (
+            request.get("tool_call") if hasattr(request, "get") else None
+        )
         tool_name = tool_call.get("name", "") if tool_call else ""
         start = time.time()
         try:
@@ -174,32 +212,14 @@ class MetricsMiddleware(AgentMiddleware):
             self._record_tool(tool_name, time.time() - start, success=False)
             raise
 
-    # ---------- 内部：LLM ----------
+    # ---------- 内部 ----------
 
     def _record_llm(self, result: Any, duration_s: float) -> None:
         try:
-            if self.debug:
-                print(f"[metrics-debug] result type = {type(result)}")
-
             message = _unwrap_message(result)
-
-            if self.debug and message is not None:
-                print(f"[metrics-debug] unwrapped = {type(message)}")
-                print(
-                    f"[metrics-debug] usage_metadata = "
-                    f"{getattr(message, 'usage_metadata', None)}"
-                )
-
             usage = _extract_usage(message)
-
-            # 流式模式下每个 chunk 都会进这里，只有带 usage 的 chunk 才有意义。
-            # usage 全 0 就跳过，避免日志和数据库里满是"in=0 out=0"的垃圾。
-            total_tokens = (
-                usage["input_tokens"]
-                + usage["output_tokens"]
-                + usage["cache_read_tokens"]
-            )
-            if total_tokens == 0:
+            total = usage["input_tokens"] + usage["output_tokens"] + usage["cache_read_tokens"]
+            if total == 0:
                 return
 
             model = _extract_model_name(message, default=self.default_model_name)
@@ -209,7 +229,7 @@ class MetricsMiddleware(AgentMiddleware):
                 usage["cache_read_tokens"],
             )
 
-            self.store.record_llm(
+            self.writer.submit_llm(
                 model=model,
                 input_tokens=usage["input_tokens"],
                 output_tokens=usage["output_tokens"],
@@ -219,76 +239,52 @@ class MetricsMiddleware(AgentMiddleware):
                 cost_usd=cost,
             )
 
-            try:
-                from observability.logger import get_logger
-                get_logger("llm").info(
-                    "llm_call",
-                    model=model,
-                    input_tokens=usage["input_tokens"],
-                    output_tokens=usage["output_tokens"],
-                    cache_read=usage["cache_read_tokens"],
-                    duration_s=round(duration_s, 3),
-                    cost_usd=round(cost, 6),
-                )
-            except Exception:
-                pass
-
             if self.on_metric:
                 try:
-                    self.on_metric({
-                        "type": "llm",
-                        "model": model,
-                        "input_tokens": usage["input_tokens"],
-                        "output_tokens": usage["output_tokens"],
-                        "cache_read": usage["cache_read_tokens"],
-                        "duration_s": round(duration_s, 3),
-                        "cost_usd": round(cost, 6),
-                        "timestamp": time.time(),
-                    })
+                    self.on_metric(
+                        {
+                            "type": "llm",
+                            "model": model,
+                            "input_tokens": usage["input_tokens"],
+                            "output_tokens": usage["output_tokens"],
+                            "cache_read": usage["cache_read_tokens"],
+                            "duration_s": round(duration_s, 3),
+                            "cost_usd": round(cost, 6),
+                            "timestamp": time.time(),
+                        }
+                    )
                 except Exception:
                     pass
-
-        except Exception as e:
+        except Exception:
             if self.debug:
-                print(f"[metrics-debug] _record_llm 异常: {type(e).__name__}: {e}")
+                import traceback
 
-    # ---------- 内部：工具 ----------
+                traceback.print_exc()
 
     def _record_tool(self, tool_name: str, duration_s: float, success: bool) -> None:
         if not tool_name:
             return
         try:
-            self.store.record_tool(
+            self.writer.submit_tool(
                 tool_name=tool_name,
                 duration_ms=duration_s * 1000,
                 success=success,
             )
-            try:
-                from observability.logger import get_logger
-                get_logger("tool").info(
-                    "tool_call",
-                    tool=tool_name,
-                    duration_s=round(duration_s, 3),
-                    success=success,
-                )
-            except Exception:
-                pass
-
             if self.on_metric:
                 try:
-                    self.on_metric({
-                        "type": "tool",
-                        "tool": tool_name,
-                        "duration_s": round(duration_s, 3),
-                        "success": success,
-                        "timestamp": time.time(),
-                    })
+                    self.on_metric(
+                        {
+                            "type": "tool",
+                            "tool": tool_name,
+                            "duration_s": round(duration_s, 3),
+                            "success": success,
+                            "timestamp": time.time(),
+                        }
+                    )
                 except Exception:
                     pass
         except Exception:
             pass
-
-    # ---------- 成本估算 ----------
 
     def _estimate_cost(
         self,

@@ -1,11 +1,11 @@
 """Day 24: 测试工具的 LangChain 封装。"""
+
 from __future__ import annotations
 
 from langchain.tools import tool
 
-from sandbox.base import Sandbox
 from agent.test_loop import parse_test_output
-
+from sandbox.base import Sandbox
 
 _SANDBOX: Sandbox | None = None
 

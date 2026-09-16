@@ -1,3 +1,10 @@
+---
+name: codebase-design_DESIGN-IT-TWICE
+category: 设计与研究
+description: codebase-design 子文档：两次设计法。内部引用，不单独触发。
+hidden: true
+---
+
 # Design It Twice
 
 When the user wants to explore alternative interfaces for a chosen deepening candidate, use this parallel sub-agent pattern. Based on "Design It Twice" (Ousterhout): your first idea is unlikely to be the best.

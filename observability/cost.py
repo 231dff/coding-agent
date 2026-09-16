@@ -3,12 +3,12 @@
 区分输入/输出/缓存命中，按模型定价计算。
 仅统计 DeepSeek 与 Qwen 系列模型。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from observability.metrics import MetricsCollector
-
 
 # 默认模型：未匹配到定价时回退到此模型的费率
 DEFAULT_MODEL = "qwen3.8-max-0902"
@@ -42,7 +42,6 @@ PRICING: dict[str, dict[str, float]] = {
         "cache_read": 0.005,
         "cache_write": 0.06,
     },
-
     # ========== DeepSeek ==========
     "deepseek-chat": {
         "input": 0.27,
@@ -62,6 +61,7 @@ PRICING: dict[str, dict[str, float]] = {
 @dataclass
 class CostBreakdown:
     """成本明细。"""
+
     input_cost: float = 0.0
     output_cost: float = 0.0
     cache_read_cost: float = 0.0
@@ -69,12 +69,7 @@ class CostBreakdown:
 
     @property
     def total(self) -> float:
-        return (
-            self.input_cost
-            + self.output_cost
-            + self.cache_read_cost
-            + self.cache_write_cost
-        )
+        return self.input_cost + self.output_cost + self.cache_read_cost + self.cache_write_cost
 
     def to_text(self) -> str:
         return (
@@ -130,9 +125,7 @@ class CostCalculator:
             cache_write_cost=cache_write_tokens * p["cache_write"] / 1_000_000,
         )
 
-    def from_metrics(
-        self, metrics: MetricsCollector, model: str
-    ) -> CostBreakdown:
+    def from_metrics(self, metrics: MetricsCollector, model: str) -> CostBreakdown:
         """从 MetricsCollector 聚合成本。"""
         return self.calculate(
             model=model,

@@ -3,20 +3,19 @@
 核心策略：大体积工具输出不直接进上下文，而是落盘到沙箱，
 上下文中只保留摘要预览 + 文件路径。
 """
+
 from __future__ import annotations
 
 import hashlib
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-
-from langchain_core.messages import ToolMessage
 
 
 @dataclass
 class BudgetConfig:
     """预算控制配置。"""
+
     # 触发落盘的 token 阈值（粗略：1 token ≈ 4 chars）
     token_threshold: int = 2000
     # 预览行数
@@ -32,6 +31,7 @@ class BudgetConfig:
 @dataclass
 class OffloadedResult:
     """已落盘的工具结果。"""
+
     tool_call_id: str
     file_path: str
     original_size: int
@@ -58,9 +58,7 @@ class ToolResultBudget:
         # 已冻结的替换决策：tool_call_id -> OffloadedResult
         self._frozen: dict[str, OffloadedResult] = {}
 
-    def process_tool_result(
-        self, tool_call_id: str, content: str, tool_name: str = ""
-    ) -> str:
+    def process_tool_result(self, tool_call_id: str, content: str, tool_name: str = "") -> str:
         """处理工具结果。
 
         返回：原始内容（如果未超阈值）或摘要预览（如果已落盘）。
@@ -84,9 +82,7 @@ class ToolResultBudget:
 
         return self._format_preview(offloaded)
 
-    def _offload(
-        self, tool_call_id: str, content: str, tool_name: str
-    ) -> OffloadedResult:
+    def _offload(self, tool_call_id: str, content: str, tool_name: str) -> OffloadedResult:
         """将内容落盘。"""
         # 文件名：tool_name + 哈希前缀
         safe_name = tool_name.replace("/", "_") if tool_name else "tool"
@@ -98,10 +94,10 @@ class ToolResultBudget:
 
         # 生成预览
         lines = content.splitlines()
-        preview_lines = lines[:self.config.preview_lines]
+        preview_lines = lines[: self.config.preview_lines]
         preview = "\n".join(preview_lines)
         if len(preview) > self.config.preview_chars:
-            preview = preview[:self.config.preview_chars] + "..."
+            preview = preview[: self.config.preview_chars] + "..."
 
         rel_path = str(file_path.relative_to(self.workspace))
 
@@ -128,8 +124,6 @@ class ToolResultBudget:
         """返回预算统计。"""
         return {
             "offloaded_count": len(self._frozen),
-            "total_offloaded_bytes": sum(
-                o.original_size for o in self._frozen.values()
-            ),
+            "total_offloaded_bytes": sum(o.original_size for o in self._frozen.values()),
             "offload_dir": str(self.offload_dir),
         }

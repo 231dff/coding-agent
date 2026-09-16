@@ -3,6 +3,7 @@
 定义后端无关的 Sandbox 接口，Docker 只是其中一种实现。
 未来可替换为 E2B、Modal、Daytona 等云端沙箱。
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -13,6 +14,7 @@ from pathlib import Path
 @dataclass
 class ExecResult:
     """一次命令执行的结果。"""
+
     exit_code: int
     stdout: str
     stderr: str

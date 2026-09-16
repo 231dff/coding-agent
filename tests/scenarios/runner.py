@@ -3,11 +3,12 @@
 每个场景定义：任务描述、前置文件、成功断言、token 预算。
 统计成功率与失败模式，输出 M1 报告。
 """
+
 import json
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from agent.config import AgentConfig
 from agent.core import build_agent
@@ -17,7 +18,7 @@ from agent.core import build_agent
 class Scenario:
     name: str
     task: str
-    setup: dict[str, str]          # path -> content，前置创建的文件
+    setup: dict[str, str]  # path -> content，前置创建的文件
     assert_fn: Callable[[Path], bool]
     expected_tool_calls: int = 8
     token_budget: int = 4000
@@ -93,11 +94,13 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         name="edit_conflict_recovery",
         task="app.py 里有多处 return x，把 process_a 函数中的 return x 改成 return y。",
-        setup={"app.py": (
-            "def process_a():\n    return x\n\n"
-            "def process_b():\n    return x\n\n"
-            "def process_c():\n    return x\n"
-        )},
+        setup={
+            "app.py": (
+                "def process_a():\n    return x\n\n"
+                "def process_b():\n    return x\n\n"
+                "def process_c():\n    return x\n"
+            )
+        },
         assert_fn=lambda ws: "return y" in (ws / "app.py").read_text(),
         expected_tool_calls=10,
     ),
@@ -126,8 +129,8 @@ SCENARIOS: list[Scenario] = [
 
 
 def run_all(model: str = "openai:qwen3.8-max-0902") -> dict:
-    import tempfile
     import shutil
+    import tempfile
 
     results = []
     for sc in SCENARIOS:
@@ -156,13 +159,15 @@ def run_all(model: str = "openai:qwen3.8-max-0902") -> dict:
             passed = False
             error = str(e)
 
-        results.append({
-            "name": sc.name,
-            "passed": passed,
-            "tool_calls": tool_calls,
-            "elapsed_s": round(elapsed, 2),
-            "error": error,
-        })
+        results.append(
+            {
+                "name": sc.name,
+                "passed": passed,
+                "tool_calls": tool_calls,
+                "elapsed_s": round(elapsed, 2),
+                "error": error,
+            }
+        )
         shutil.rmtree(ws, ignore_errors=True)
 
     total = len(results)
@@ -182,7 +187,5 @@ if __name__ == "__main__":
     print(json.dumps(report, ensure_ascii=False, indent=2))
     report_path = Path("docs/m1_report.json")
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n成功率: {report['passed']}/{report['total']} ({report['success_rate']:.0%})")

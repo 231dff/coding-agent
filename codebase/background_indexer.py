@@ -6,6 +6,7 @@
 3. 索引未就绪时，工具返回有指导性的提示而非空错误
 4. 优雅停止——进程退出或 Agent 关闭时能 join 后台线程
 """
+
 from __future__ import annotations
 
 import threading
@@ -30,6 +31,7 @@ class IndexStatus(str, Enum):
 @dataclass
 class IndexProgress:
     """索引进度快照。"""
+
     total: int = 0
     done: int = 0
     current_file: str = ""
@@ -204,4 +206,5 @@ class BackgroundIndexer:
 
 class _Stopped(Exception):
     """内部信号：后台线程收到停止请求。"""
+
     pass

@@ -2,11 +2,11 @@
 
 同时实现同步和异步版本。
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
@@ -122,7 +122,7 @@ class DependencyCheckMiddleware(AgentMiddleware):
                 continue
 
             lines.append(f"\n修改 `{sym}` 可能影响以下文件:")
-            for f in affected[:self.config.max_affected]:
+            for f in affected[: self.config.max_affected]:
                 lines.append(f"  - {f}")
             if len(affected) > self.config.max_affected:
                 lines.append(f"  ... 还有 {len(affected) - self.config.max_affected} 个")
@@ -134,8 +134,7 @@ class DependencyCheckMiddleware(AgentMiddleware):
                 )
 
         lines.append(
-            "\n建议: 使用 `begin_transaction` 开启事务，"
-            "同时修改以上所有文件以保证接口一致性。"
+            "\n建议: 使用 `begin_transaction` 开启事务，同时修改以上所有文件以保证接口一致性。"
         )
         return "\n".join(lines)
 

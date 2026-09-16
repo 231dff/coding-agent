@@ -1,3 +1,11 @@
+---
+name: teach_MISSION-FORMAT
+category: 用户主动触发
+description: teach 子文档：MISSION 格式。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # MISSION.md Format
 
 `MISSION.md` lives at the workspace root. It captures the _reason_ the user is learning this topic. Every teaching decision (what to teach next, which resources to surface, which exercises to design) should trace back to this document.

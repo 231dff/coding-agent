@@ -4,12 +4,12 @@
 二分搜索适配 token 预算。repo map 模式通过 tree-sitter 解析源代码，
 按 PageRank 对符号排序，然后二分搜索将结果适配到 agent 的 token 预算中。
 """
+
 from __future__ import annotations
 
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
 
 import networkx as nx
 
@@ -19,6 +19,7 @@ from codebase.parser import CodeParser, Symbol
 @dataclass
 class RepoMapEntry:
     """Repo Map 中的一个条目。"""
+
     file: str
     symbol: Symbol
     score: float
@@ -83,6 +84,7 @@ class RepoMapBuilder:
 
         # 第二遍：提取引用关系
         from tree_sitter import QueryCursor
+
         from codebase.parser import _get_py_query
 
         query = _get_py_query()
@@ -135,32 +137,31 @@ class RepoMapBuilder:
         total = sum(weights.values())
         return {k: v / total for k, v in weights.items()}
 
-    def _rank_symbols(
-        self, parsed_files, scores: dict[str, float]
-    ) -> list[RepoMapEntry]:
+    def _rank_symbols(self, parsed_files, scores: dict[str, float]) -> list[RepoMapEntry]:
         """按文件分数对符号排序。"""
         entries = []
         for pf in parsed_files:
             file_score = scores.get(pf.path, 0.0)
             # 文件内符号按行号排序，保持阅读顺序
             for sym in sorted(pf.symbols, key=lambda s: s.start_line):
-                entries.append(RepoMapEntry(
-                    file=pf.path,
-                    symbol=sym,
-                    score=file_score,
-                ))
+                entries.append(
+                    RepoMapEntry(
+                        file=pf.path,
+                        symbol=sym,
+                        score=file_score,
+                    )
+                )
         # 按分数降序
         entries.sort(key=lambda e: -e.score)
         return entries
 
-    def _fit_to_budget(
-        self, entries: list[RepoMapEntry], token_budget: int
-    ) -> str:
+    def _fit_to_budget(self, entries: list[RepoMapEntry], token_budget: int) -> str:
         """二分搜索适配 token 预算。
 
         get_ranked_tags_map() 方法二分搜索适配 max_map_tokens 的最多 ranked tags，
         目标控制在预算的 15% 以内。
         """
+
         # 估算每个条目的 token 数（粗略：1 token ≈ 4 chars）
         def render(entry_list: list[RepoMapEntry]) -> str:
             lines: list[str] = []
@@ -196,6 +197,7 @@ class RepoMapBuilder:
 
 
 # ---- LangChain 工具封装 ----
+
 
 def create_repo_map_tool(builder: RepoMapBuilder):
     """将 RepoMapBuilder 封装为 LangChain 工具。"""

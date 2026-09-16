@@ -1,3 +1,11 @@
+---
+name: triage_OUT-OF-SCOPE
+category: 用户主动触发
+description: triage 子文档：out-of-scope 处理。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Out-of-Scope Knowledge Base
 
 The `.out-of-scope/` directory in a repo stores persistent records of rejected feature requests. It serves two purposes:

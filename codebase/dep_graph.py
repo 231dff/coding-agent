@@ -3,10 +3,10 @@
 解析 Python 文件的 import 语句，构建文件到文件的依赖关系。
 支持正向/反向查询、循环依赖检测、传递依赖分析。
 """
+
 from __future__ import annotations
 
 import ast
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,11 +18,12 @@ from codebase.parser import CodeParser
 @dataclass
 class ImportInfo:
     """一条 import 记录。"""
+
     source_file: str
-    target_module: str          # 原始模块字符串
-    resolved_file: str | None   # 解析后的文件路径（None 表示外部包）
+    target_module: str  # 原始模块字符串
+    resolved_file: str | None  # 解析后的文件路径（None 表示外部包）
     line: int
-    names: list[str]            # 导入的符号名
+    names: list[str]  # 导入的符号名
 
 
 class DependencyGraph:
@@ -123,13 +124,15 @@ class DependencyGraph:
     ) -> None:
         """记录一条 import 并尝试解析到文件。"""
         resolved = self._resolve_module(module, source_file)
-        self.imports.append(ImportInfo(
-            source_file=source_file,
-            target_module=module,
-            resolved_file=resolved,
-            line=line,
-            names=names,
-        ))
+        self.imports.append(
+            ImportInfo(
+                source_file=source_file,
+                target_module=module,
+                resolved_file=resolved,
+                line=line,
+                names=names,
+            )
+        )
 
     def _resolve_module(self, module: str, source_file: str) -> str | None:
         """将模块名解析到文件路径。"""
@@ -231,6 +234,7 @@ class DependencyGraph:
 
 
 # ---- LangChain 工具封装 ----
+
 
 def create_dep_tools(dep_graph: DependencyGraph):
     """将 DependencyGraph 封装为 LangChain 工具。"""

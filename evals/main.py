@@ -5,6 +5,7 @@
     python -m evals --parallel --max-workers 4
     python -m evals --baseline evals/baseline.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -12,8 +13,8 @@ import sys
 from pathlib import Path
 
 from evals.dataset import load_tasks
+from evals.report import generate_markdown_report, load_results, save_results
 from evals.runner import run_suite
-from evals.report import generate_markdown_report, save_results, load_results
 
 
 def main() -> int:
@@ -70,6 +71,7 @@ def main() -> int:
     # 回归门禁
     if baseline:
         from evals.scorer import compare_baselines
+
         passed, _ = compare_baselines(results, baseline)
         return 0 if passed else 2
 

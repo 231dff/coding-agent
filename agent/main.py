@@ -4,26 +4,30 @@
     coding-agent init [--project PATH]
     coding-agent [--project PATH] [--model MODEL] [task]
 """
+
 from __future__ import annotations
-import os
+
 import argparse
+import os
 import sys
+import time
 from pathlib import Path
 
+from langchain_core.messages import AIMessageChunk, ToolMessage
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
-from rich.live import Live
 from rich.text import Text
 
 from agent.config import AgentConfig, resolve_project_path
 from agent.core import build_agent
 from agent.setup_wizard import maybe_run_first_time_setup, run_setup_wizard
 from observability.logger import bind_context, configure_logging, get_logger
-from observability.tracing import configure as configure_tracing, is_enabled, status_text
 from observability.metrics_display import MetricsDisplay
-
+from observability.tracing import configure as configure_tracing
+from observability.tracing import is_enabled, status_text
 
 console = Console()
 log = get_logger("main")
@@ -37,15 +41,17 @@ BANNER = """[bold cyan]
 [/bold cyan]"""
 
 
+# ============================================================
+# 欢迎 / 帮助 / 配置
+# ============================================================
+
+
 def print_welcome(project_path: Path, rt) -> None:
     console.print(BANNER)
     console.print(f"[bold]项目:[/bold] {project_path}")
 
     cfg = rt.config
-    console.print(
-        f"[bold]模型:[/bold] {cfg.provider_id}/{cfg.model}"
-        f" [dim]({cfg.base_url})[/dim]"
-    )
+    console.print(f"[bold]模型:[/bold] {cfg.provider_id}/{cfg.model} [dim]({cfg.base_url})[/dim]")
 
     if rt.skill_registry:
         stats = rt.skill_registry.stats()
@@ -57,25 +63,25 @@ def print_welcome(project_path: Path, rt) -> None:
     if is_enabled():
         console.print(f"[dim]LangSmith: {status_text()}[/dim]")
 
-    console.print(
-        "[dim]输入任务描述，Enter 发送。输入 /help 查看命令。[/dim]\n"
-    )
+    console.print("[dim]输入任务描述，Enter 发送。输入 /help 查看命令。[/dim]\n")
 
 
 def print_help() -> None:
-    console.print(Panel(
-        "[bold]可用命令[/bold]\n"
-        "  /exit         退出\n"
-        "  /help         显示帮助\n"
-        "  /clear        清空当前会话状态\n"
-        "  /skills       列出所有技能\n"
-        "  /config       显示当前配置\n"
-        "  /metrics      显示本次会话指标\n"
-        "  /trace        查看最近的调用指标\n"
-        "  /<skill-name> 加载 user-invoked 技能\n"
-        "  其他输入       作为任务发送给 Agent",
-        title="Help",
-    ))
+    console.print(
+        Panel(
+            "[bold]可用命令[/bold]\n"
+            "  /exit         退出\n"
+            "  /help         显示帮助\n"
+            "  /clear        清空当前会话状态\n"
+            "  /skills       列出所有技能\n"
+            "  /config       显示当前配置\n"
+            "  /metrics      显示本次会话指标\n"
+            "  /trace        查看最近的调用指标\n"
+            "  /<skill-name> 加载 user-invoked 技能\n"
+            "  其他输入       作为任务发送给 Agent",
+            title="Help",
+        )
+    )
 
 
 def list_skills(rt) -> None:
@@ -93,21 +99,18 @@ def list_skills(rt) -> None:
                 else "[green]model[/green]"
             )
             prefix = "/" if skill.disable_model_invocation else " "
-            console.print(
-                f"  {tag} {prefix}{skill.name}: {skill.description[:80]}"
-            )
+            console.print(f"  {tag} {prefix}{skill.name}: {skill.description[:80]}")
     console.print()
 
 
 def show_config(rt) -> None:
     cfg = rt.config
     from agent.config import global_config_file, project_config_file
+
     lines = [f"  [bold]{k}:[/bold] {v}" for k, v in cfg.to_dict().items()]
     lines.append("")
     lines.append(f"  [dim]全局配置: {global_config_file()}[/dim]")
-    lines.append(
-        f"  [dim]项目配置: {project_config_file(cfg.project_path)}[/dim]"
-    )
+    lines.append(f"  [dim]项目配置: {project_config_file(cfg.project_path)}[/dim]")
     if is_enabled():
         lines.append(f"  [dim]LangSmith: {status_text()}[/dim]")
     console.print(Panel("\n".join(lines), title="当前配置"))
@@ -116,14 +119,17 @@ def show_config(rt) -> None:
 def show_metrics(rt) -> None:
     try:
         from api.metrics_timeseries import get_store
+
         store = get_store()
         stats = store.stats()
-        console.print(Panel(
-            f"  [bold]存储文件:[/bold] {stats['db_path']}\n"
-            f"  [bold]总行数:[/bold] {stats['total_rows']}\n"
-            f"  [bold]文件大小:[/bold] {stats['db_size_bytes'] / 1024:.1f} KB",
-            title="指标存储",
-        ))
+        console.print(
+            Panel(
+                f"  [bold]存储文件:[/bold] {stats['db_path']}\n"
+                f"  [bold]总行数:[/bold] {stats['total_rows']}\n"
+                f"  [bold]文件大小:[/bold] {stats['db_size_bytes'] / 1024:.1f} KB",
+                title="指标存储",
+            )
+        )
     except Exception as e:
         console.print(f"[red]获取指标失败: {e}[/red]")
 
@@ -142,6 +148,11 @@ def parse_agent_args() -> argparse.Namespace:
     parser.add_argument("--thread-id", default="default")
     parser.add_argument("task", nargs="?", default=None)
     return parser.parse_args()
+
+
+# ============================================================
+# 流式渲染辅助
+# ============================================================
 
 
 def _extract_reasoning(chunk) -> str:
@@ -181,20 +192,84 @@ def _extract_content(chunk) -> str:
     return ""
 
 
+def _has_tool_call_signal(msg) -> bool:
+    """判断当前 chunk 是否携带"有工具调用"的信号。
+
+    流式早期只有 tool_call_chunks 有内容，tool_calls 是空的。
+    所以两个都要检查。
+    """
+    tcc = getattr(msg, "tool_call_chunks", None)
+    if tcc:
+        return True
+    tc = getattr(msg, "tool_calls", None)
+    if tc:
+        return True
+    return False
+
+
+def _dedup_repeats(text: str) -> str:
+    """去掉文本尾部整段重复（模型复读兜底）。"""
+    if len(text) < 400:
+        return text
+
+    n = len(text)
+    for seg_len in (500, 300, 200, 150):
+        if seg_len * 2 > n:
+            continue
+        seg = text[n // 2 : n // 2 + seg_len]
+        if not seg.strip():
+            continue
+        idx = text.find(seg, n // 2 + seg_len)
+        if idx > 0:
+            return text[:idx].rstrip()
+    return text
+
+
+# ============================================================
+# 流式任务执行
+# ============================================================
+
+
 def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
     """流式调用 Agent，实时展示 reasoning 和 content。
 
-    显示策略：
-    - 生成过程中：用 Rich Live 实时刷新
-      - 上方：灰色斜体的思考内容（只保留最后 N 个字符）
-      - 下方：正常回答内容
-    - 生成结束后：Live 区域清掉，主流程用 Panel + Markdown 渲染最终回答
+    关键设计（解决"每轮 tool_call 前的预告被累积"的问题）：
 
-    返回最终 content 字符串。
+    - 每轮 LLM 的 content 先进 pending_content
+    - 检测到 tool_call_chunks / tool_calls 就标记本轮有工具调用
+    - 收到 ToolMessage 时代表本轮结束：
+        * 有工具调用 → 丢弃 pending（那是"我先看一下 X"这种预告）
+        * 无工具调用 → 并入 content_buf（这是真正的答案）
+    - 流结束时再 flush 一次
+    - 只用 stream_mode="messages"，避免 updates 累积
+    - 工具事件从 ToolMessage 取，按名字去重
     """
     reasoning_buf: list[str] = []
-    content_buf: list[str] = []
-    REASONING_DISPLAY_MAX = 1500
+    content_buf: list[str] = []  # 最终答案（已确认非预告）
+    pending_content: list[str] = []  # 当前轮暂存
+    round_has_tool_call = [False]  # 当前轮是否出现工具调用信号
+    tool_seen: set[str] = set()
+    tool_events: list[str] = []
+
+    REASONING_DISPLAY_MAX = 1200
+    TOOL_DISPLAY_MAX = 6
+    _last_update = [0.0]
+
+    def flush_round():
+        """当前轮结束：按标记决定 pending 的归属。"""
+        if not round_has_tool_call[0] and pending_content:
+            content_buf.extend(pending_content)
+        pending_content.clear()
+        round_has_tool_call[0] = False
+
+    def current_display_text() -> str:
+        """显示用文本：已确认的 content_buf + 当前 pending（若本轮无工具信号）。"""
+        parts = []
+        if content_buf:
+            parts.append("".join(content_buf))
+        if not round_has_tool_call[0] and pending_content:
+            parts.append("".join(pending_content))
+        return "".join(parts)
 
     def build_display() -> Text:
         t = Text()
@@ -205,44 +280,81 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
             t.append("💭 思考中…\n", style="dim italic")
             t.append(full, style="dim")
             t.append("\n\n")
-        if content_buf:
-            t.append("".join(content_buf))
+        if tool_events:
+            for line in tool_events[-TOOL_DISPLAY_MAX:]:
+                t.append(line + "\n", style="cyan")
+            t.append("\n")
+        text = current_display_text()
+        if text:
+            t.append(text)
         return t
 
-    with Live(
+    live = Live(
         build_display(),
         console=console,
-        refresh_per_second=8,
+        refresh_per_second=4,
         transient=True,
         vertical_overflow="visible",
-    ) as live:
+    )
+
+    with live:
         for chunk in rt.agent.stream(
             {"messages": [{"role": "user", "content": task}]},
-            config={"configurable": {"thread_id": thread_id}},
+            config={
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": rt.config.max_iterations * 2,
+            },
             stream_mode="messages",
         ):
             msg = chunk[0] if isinstance(chunk, tuple) else chunk
             if msg is None:
                 continue
 
-            reasoning = _extract_reasoning(msg)
-            if reasoning:
-                reasoning_buf.append(reasoning)
+            if isinstance(msg, AIMessageChunk):
+                # 只要出现工具调用信号，就标记本轮有工具
+                if _has_tool_call_signal(msg):
+                    round_has_tool_call[0] = True
 
-            content = _extract_content(msg)
-            if content:
-                content_buf.append(content)
+                c = _extract_content(msg)
+                if c:
+                    pending_content.append(c)
 
-            live.update(build_display())
+                r = _extract_reasoning(msg)
+                if r:
+                    reasoning_buf.append(r)
 
-    return "".join(content_buf)
+            elif isinstance(msg, ToolMessage):
+                # 本轮结束
+                flush_round()
+
+                name = getattr(msg, "name", "tool") or "tool"
+                if name not in tool_seen:
+                    tool_seen.add(name)
+                    tool_events.append(f"  ⚙ {name} ✓")
+
+            now = time.time()
+            if now - _last_update[0] > 0.25:
+                live.update(build_display())
+                _last_update[0] = now
+
+        # 流结束：最后一次冲刷
+        flush_round()
+        live.update(build_display())
+
+    raw = "".join(content_buf)
+    return _dedup_repeats(raw)
+
+
+# ============================================================
+# 单次任务 / 交互模式
+# ============================================================
 
 
 def run_single_task(rt, task: str, thread_id: str, display: MetricsDisplay) -> None:
     console.print(f"[bold green]任务:[/bold green] {task}\n")
     try:
         content = stream_task_with_reasoning(rt, task, thread_id)
-        display.flush()                      # ← 先吐指标行
+        display.flush()
         console.print()
         console.print(Panel(Markdown(content), title="回复", border_style="cyan"))
     except KeyboardInterrupt:
@@ -267,10 +379,7 @@ def handle_user_invoked_skill(rt, user_input: str) -> str | None:
     if skill is None:
         return None
     if not skill.disable_model_invocation:
-        console.print(
-            f"[yellow]{skill_name} 是 model-invoked 技能，"
-            f"模型会自动调用[/yellow]"
-        )
+        console.print(f"[yellow]{skill_name} 是 model-invoked 技能，模型会自动调用[/yellow]")
         return None
 
     console.print(f"[dim]加载技能: {skill_name}[/dim]")
@@ -324,8 +433,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
             handled = handle_user_invoked_skill(rt, user_input)
             if handled is None:
                 console.print(
-                    f"[red]未知命令或技能: {user_input}[/red]\n"
-                    f"[dim]输入 /help 查看命令[/dim]"
+                    f"[red]未知命令或技能: {user_input}[/red]\n[dim]输入 /help 查看命令[/dim]"
                 )
                 continue
             task_text = handled
@@ -338,7 +446,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         try:
             console.print()
             content = stream_task_with_reasoning(rt, task_text, thread_id)
-            display.flush()                          # ← 先吐指标行
+            display.flush()
             console.print()
             console.print(Panel(Markdown(content), border_style="cyan"))
             console.print()
@@ -352,6 +460,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 # ============================================================
 # init 子命令
 # ============================================================
+
 
 def cmd_init(args: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="coding-agent init")
@@ -371,6 +480,7 @@ def cmd_init(args: list[str]) -> int:
 # ============================================================
 # 主入口
 # ============================================================
+
 
 def main() -> int:
     json_logs = os.getenv("LOG_JSON", "false").lower() == "true"
@@ -436,5 +546,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    import os
     sys.exit(main())

@@ -4,13 +4,13 @@
 消息中只保留文件路径。信息根据上下文压力和任务状态，
 从完整原文逐步降级为 JSONL、摘要，再降级为 metadata。
 """
+
 from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from langchain_core.messages import BaseMessage
 
@@ -18,6 +18,7 @@ from langchain_core.messages import BaseMessage
 @dataclass
 class OffloadConfig:
     """卸载配置。"""
+
     base_dir: str = ".context_offload"
     # 完整日志落盘
     save_full_log: bool = True
@@ -54,8 +55,9 @@ class ContextOffloader:
             落盘文件的相对路径。
         """
         timestamp = int(time.time())
-        filename = f"{session_id}_{label}_{timestamp}.md" if label \
-            else f"{session_id}_{timestamp}.md"
+        filename = (
+            f"{session_id}_{label}_{timestamp}.md" if label else f"{session_id}_{timestamp}.md"
+        )
         file_path = self.base_dir / filename
 
         content = self._serialize_messages(messages)
@@ -69,7 +71,7 @@ class ContextOffloader:
 
     def _serialize_messages(self, messages: list[BaseMessage]) -> str:
         """序列化消息为 markdown。"""
-        lines = [f"# 对话历史快照\n", f"导出时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"]
+        lines = ["# 对话历史快照\n", f"导出时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"]
         for i, msg in enumerate(messages):
             role = msg.__class__.__name__.replace("Message", "")
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
@@ -78,9 +80,7 @@ class ContextOffloader:
             lines.append("\n---\n")
         return "\n".join(lines)
 
-    def _append_index(
-        self, session_id: str, filename: str, message_count: int
-    ) -> None:
+    def _append_index(self, session_id: str, filename: str, message_count: int) -> None:
         """追加 JSONL 索引。"""
         index_file = self.base_dir / "index.jsonl"
         entry = {
@@ -96,8 +96,10 @@ class ContextOffloader:
         """返回截断版内容。"""
         if len(content) <= self.config.truncated_chars:
             return content
-        return content[:self.config.truncated_chars] + \
-            f"\n... (truncated, {len(content)} chars total)"
+        return (
+            content[: self.config.truncated_chars]
+            + f"\n... (truncated, {len(content)} chars total)"
+        )
 
     def retrieve(self, file_path: str) -> str:
         """回溯完整内容。"""
@@ -105,4 +107,3 @@ class ContextOffloader:
         if not full_path.is_file():
             return f"文件不存在: {file_path}"
         return full_path.read_text(encoding="utf-8")
-        

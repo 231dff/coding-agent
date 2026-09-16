@@ -1,5 +1,5 @@
 """Day 23-24: 图测试。"""
-import pytest
+
 from agent.test_loop import parse_test_output
 
 

@@ -5,6 +5,7 @@
 - 每工具：调用次数、成功/失败、平均耗时
 - 每会话：总成本、缓存命中率、压缩次数
 """
+
 from __future__ import annotations
 
 import threading
@@ -17,6 +18,7 @@ from typing import Any
 @dataclass
 class CallRecord:
     """一次模型调用记录。"""
+
     model: str
     input_tokens: int
     output_tokens: int
@@ -31,6 +33,7 @@ class CallRecord:
 @dataclass
 class ToolCallRecord:
     """一次工具调用记录。"""
+
     tool_name: str
     duration_s: float
     success: bool

@@ -8,9 +8,9 @@
 5. 检查成功断言
 6. 收集指标
 """
+
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 import time
@@ -27,6 +27,7 @@ from observability.metrics import MetricsCollector
 @dataclass
 class TaskResult:
     """单个任务的执行结果。"""
+
     task_id: str
     category: str
     passed: bool

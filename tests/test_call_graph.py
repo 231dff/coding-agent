@@ -1,9 +1,11 @@
 """Day 10: 调用图与影响分析测试。"""
+
 import pytest
-from codebase.parser import CodeParser
-from codebase.dep_graph import DependencyGraph
+
 from codebase.call_graph import CallGraph
+from codebase.dep_graph import DependencyGraph
 from codebase.impact import ImpactAnalyzer
+from codebase.parser import CodeParser
 
 
 @pytest.fixture
@@ -16,10 +18,7 @@ def call_project(tmp_path):
         "    return data is not None\n"
     )
     (tmp_path / "api.py").write_text(
-        "from service import process\n"
-        "\n"
-        "def handler(request):\n"
-        "    return process(request)\n"
+        "from service import process\n\ndef handler(request):\n    return process(request)\n"
     )
     return tmp_path
 

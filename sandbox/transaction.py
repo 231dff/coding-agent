@@ -6,6 +6,7 @@
 3. commit 时校验语法 + 原子替换
 4. 失败自动回滚
 """
+
 from __future__ import annotations
 
 import shutil
@@ -21,6 +22,7 @@ from sandbox.base import Sandbox
 @dataclass
 class EditRecord:
     """一次编辑记录。"""
+
     path: str
     old_content: str
     new_content: str
@@ -30,6 +32,7 @@ class EditRecord:
 @dataclass
 class TransactionResult:
     """事务执行结果。"""
+
     ok: bool
     edited_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -90,15 +93,20 @@ class EditTransaction:
         if count > 1 and not replace_all:
             return False, f"{path} 中 old_string 出现 {count} 次，不唯一"
 
-        new_content = current.replace(old_string, new_string) if replace_all \
+        new_content = (
+            current.replace(old_string, new_string)
+            if replace_all
             else current.replace(old_string, new_string, 1)
+        )
 
         # 记录编辑（staging 内容只存内存，commit 时才落盘）
-        self._edits.append(EditRecord(
-            path=path,
-            old_content=current,
-            new_content=new_content,
-        ))
+        self._edits.append(
+            EditRecord(
+                path=path,
+                old_content=current,
+                new_content=new_content,
+            )
+        )
         return True, f"已暂存 {path} 的修改"
 
     def write_file(self, path: str, content: str) -> tuple[bool, str]:
@@ -109,11 +117,13 @@ class EditTransaction:
         src = self.workspace / path
         old = src.read_text(encoding="utf-8") if src.is_file() else ""
 
-        self._edits.append(EditRecord(
-            path=path,
-            old_content=old,
-            new_content=content,
-        ))
+        self._edits.append(
+            EditRecord(
+                path=path,
+                old_content=old,
+                new_content=content,
+            )
+        )
         return True, f"已暂存 {path} 的写入"
 
     def commit(self, syntax_check: bool = True) -> TransactionResult:
@@ -196,6 +206,7 @@ class EditTransaction:
     def _check_python_syntax(path: str, content: str) -> str | None:
         """校验 Python 语法。返回错误信息或 None。"""
         import ast
+
         try:
             ast.parse(content, filename=path)
             return None

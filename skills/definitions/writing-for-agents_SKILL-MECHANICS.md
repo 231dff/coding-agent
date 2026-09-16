@@ -1,3 +1,10 @@
+---
+name: writing-for-agents_SKILL-MECHANICS
+category: 文档与交接
+description: writing-for-agents 子文档：skill 机制。内部引用，不单独触发。
+hidden: true
+---
+
 # Skill mechanics
 
 The skill-specific branch of [`writing-for-agents`](SKILL.md): what changes when the document is a skill (frontmatter, the invocation choice, and router skills). Everything else about writing it is the universal reference in `SKILL.md`.

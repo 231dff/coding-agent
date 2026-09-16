@@ -9,6 +9,7 @@
 - developer: 可发消息、审批工具、编辑文件
 - viewer: 只读，不能发消息、不能审批
 """
+
 from __future__ import annotations
 
 import os
@@ -28,6 +29,7 @@ Role = Literal["admin", "developer", "viewer"]
 @dataclass
 class User:
     """当前用户。"""
+
     id: str
     name: str
     email: str = ""
@@ -118,10 +120,7 @@ def _fetch_jwks() -> dict:
     import httpx
 
     now = time.time()
-    if (
-        _jwks_cache["keys"] is not None
-        and now - _jwks_cache["fetched_at"] < _JWKS_TTL
-    ):
+    if _jwks_cache["keys"] is not None and now - _jwks_cache["fetched_at"] < _JWKS_TTL:
         return _jwks_cache["keys"]
 
     if not OIDC_JWKS_URL:
@@ -172,12 +171,7 @@ def _verify_jwt_oidc(token: str) -> dict:
 
 def _payload_to_user(payload: dict) -> User:
     """从 JWT payload 提取用户信息。"""
-    user_id = (
-        payload.get("sub")
-        or payload.get("user_id")
-        or payload.get("oid")
-        or "unknown"
-    )
+    user_id = payload.get("sub") or payload.get("user_id") or payload.get("oid") or "unknown"
     name = (
         payload.get("name")
         or payload.get("preferred_username")

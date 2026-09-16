@@ -4,11 +4,11 @@
 - 项目记忆：长期、跨项目、以文件形式（AGENTS.md）
 - 会话记忆：短期、跨 thread、以 Store 形式
 """
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 from langgraph.store.base import BaseStore
 
@@ -16,10 +16,11 @@ from langgraph.store.base import BaseStore
 @dataclass
 class SessionRecord:
     """一条会话记录。"""
+
     thread_id: str
     user_id: str
     task: str
-    outcome: str                   # success | failure | partial
+    outcome: str  # success | failure | partial
     files_changed: list[str] = field(default_factory=list)
     lessons: list[str] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)

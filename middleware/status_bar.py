@@ -4,6 +4,7 @@
 - 状态栏内容未变时不重复注入新消息
 - 同步 + 异步双实现
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -78,20 +79,25 @@ class StatusBarMiddleware(AgentMiddleware):
 
         # persistent 模式：直接追加新状态栏
         if self.bar.mode == "persistent":
-            messages.append(HumanMessage(
-                content=status_text,
-                additional_kwargs={"is_agent_status": True},
-            ))
+            messages.append(
+                HumanMessage(
+                    content=status_text,
+                    additional_kwargs={"is_agent_status": True},
+                )
+            )
         else:
             # replace 模式：移除旧状态栏，追加新的（会破坏缓存，不推荐）
             messages = [
-                m for m in messages
+                m
+                for m in messages
                 if not (getattr(m, "additional_kwargs", {}) or {}).get("is_agent_status")
             ]
-            messages.append(HumanMessage(
-                content=status_text,
-                additional_kwargs={"is_agent_status": True},
-            ))
+            messages.append(
+                HumanMessage(
+                    content=status_text,
+                    additional_kwargs={"is_agent_status": True},
+                )
+            )
 
         request.messages = messages
         return request

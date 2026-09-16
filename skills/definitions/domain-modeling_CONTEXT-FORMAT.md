@@ -1,3 +1,10 @@
+---
+name: domain-modeling_CONTEXT-FORMAT
+category: 设计与研究
+description: domain-modeling 子文档：CONTEXT.md 格式。内部引用，不单独触发。
+hidden: true
+---
+
 # CONTEXT.md Format
 
 ## Structure

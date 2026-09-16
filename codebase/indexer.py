@@ -3,26 +3,28 @@
 将代码按函数/类切分，生成 embedding，存入 ChromaDB。
 支持增量索引和元数据过滤。
 """
+
 from __future__ import annotations
 
-import hashlib
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 import chromadb
 from chromadb.config import Settings
-from codebase.background_indexer import IndexStatus, IndexProgress,BackgroundIndexer
-from codebase.parser import CodeParser, ParsedFile, Symbol
-from typing import Callable
+
+from codebase.background_indexer import BackgroundIndexer, IndexProgress, IndexStatus
+from codebase.parser import CodeParser, ParsedFile
 
 ProgressCallback = Callable[[int, int, str], None]
+
 
 @dataclass
 class CodeChunk:
     """一个代码块（可索引单元）。"""
-    id: str                      # 唯一 ID (file:start_line)
-    text: str                    # 含上下文的完整文本
+
+    id: str  # 唯一 ID (file:start_line)
+    text: str  # 含上下文的完整文本
     file: str
     symbol_name: str
     symbol_kind: str
@@ -111,18 +113,21 @@ class CodeIndexer:
         # 批量写入
         batch_size = 100
         for i in range(0, len(new_chunks), batch_size):
-            batch = new_chunks[i:i + batch_size]
+            batch = new_chunks[i : i + batch_size]
             self.collection.add(
                 ids=[c.id for c in batch],
                 documents=[c.text for c in batch],
-                metadatas=[{
-                    "file": c.file,
-                    "symbol_name": c.symbol_name,
-                    "symbol_kind": c.symbol_kind,
-                    "start_line": c.start_line,
-                    "end_line": c.end_line,
-                    "language": c.language,
-                } for c in batch],
+                metadatas=[
+                    {
+                        "file": c.file,
+                        "symbol_name": c.symbol_name,
+                        "symbol_kind": c.symbol_kind,
+                        "start_line": c.start_line,
+                        "end_line": c.end_line,
+                        "language": c.language,
+                    }
+                    for c in batch
+                ],
             )
 
         return len(new_chunks)
@@ -162,16 +167,18 @@ class CodeIndexer:
             # 文件过滤
             if file_filter and file_filter not in meta["file"]:
                 continue
-            output.append({
-                "id": doc_id,
-                "file": meta["file"],
-                "symbol_name": meta["symbol_name"],
-                "symbol_kind": meta["symbol_kind"],
-                "start_line": meta["start_line"],
-                "end_line": meta["end_line"],
-                "score": 1.0 - results["distances"][0][i],  # cosine 距离转相似度
-                "snippet": results["documents"][0][i][:500],
-            })
+            output.append(
+                {
+                    "id": doc_id,
+                    "file": meta["file"],
+                    "symbol_name": meta["symbol_name"],
+                    "symbol_kind": meta["symbol_kind"],
+                    "start_line": meta["start_line"],
+                    "end_line": meta["end_line"],
+                    "score": 1.0 - results["distances"][0][i],  # cosine 距离转相似度
+                    "snippet": results["documents"][0][i][:500],
+                }
+            )
 
         return output[:top_k]
 
@@ -184,7 +191,7 @@ class CodeIndexer:
 
     def index_files(
         self,
-        parsed_files: list,          # list[ParsedFile]
+        parsed_files: list,  # list[ParsedFile]
         on_progress: ProgressCallback | None = None,
         batch_size: int = 100,
         force: bool = False,
@@ -213,14 +220,17 @@ class CodeIndexer:
             self.collection.add(
                 ids=[c.id for c in pending],
                 documents=[c.text for c in pending],
-                metadatas=[{
-                    "file": c.file,
-                    "symbol_name": c.symbol_name,
-                    "symbol_kind": c.symbol_kind,
-                    "start_line": c.start_line,
-                    "end_line": c.end_line,
-                    "language": c.language,
-                } for c in pending],
+                metadatas=[
+                    {
+                        "file": c.file,
+                        "symbol_name": c.symbol_name,
+                        "symbol_kind": c.symbol_kind,
+                        "start_line": c.start_line,
+                        "end_line": c.end_line,
+                        "language": c.language,
+                    }
+                    for c in pending
+                ],
             )
             indexed_count += len(pending)
             pending = []
@@ -243,7 +253,8 @@ class CodeIndexer:
 
 # ---- LangChain 工具封装 ----
 
-def create_search_tool(bg_indexer: "BackgroundIndexer"):
+
+def create_search_tool(bg_indexer: BackgroundIndexer):
     """将 BackgroundIndexer 封装为状态感知的 LangChain 工具。"""
     from langchain.tools import tool
 
@@ -286,17 +297,11 @@ def create_search_tool(bg_indexer: "BackgroundIndexer"):
             )
 
         if status == IndexStatus.PENDING:
-            return (
-                "⏳ 索引尚未启动。\n"
-                "建议：改用 grep_search 或 repo_map 完成当前任务。"
-            )
+            return "⏳ 索引尚未启动。\n建议：改用 grep_search 或 repo_map 完成当前任务。"
 
         if status == IndexStatus.FAILED:
             snap = bg_indexer.snapshot()
-            return (
-                f"❌ 索引构建失败: {snap.error}\n"
-                f"建议：改用 grep_search 或 repo_map。"
-            )
+            return f"❌ 索引构建失败: {snap.error}\n建议：改用 grep_search 或 repo_map。"
 
         # --- 就绪：正常搜索 ---
         results = bg_indexer.search(
@@ -336,7 +341,7 @@ def create_search_tool(bg_indexer: "BackgroundIndexer"):
     return semantic_search
 
 
-def create_index_status_tool(bg_indexer: "BackgroundIndexer"):
+def create_index_status_tool(bg_indexer: BackgroundIndexer):
     """新增工具：让 Agent 主动查询索引状态。"""
     from langchain.tools import tool
 

@@ -3,18 +3,18 @@
 零配置：设置 LANGCHAIN_TRACING_V2=true 后 LangChain 自动上报。
 本模块只负责配置校验与手动 trace。
 """
+
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 
 def is_enabled() -> bool:
     """检查 tracing 是否启用。"""
-    return (
-        os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
-        and bool(os.getenv("LANGCHAIN_API_KEY"))
+    return os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true" and bool(
+        os.getenv("LANGCHAIN_API_KEY")
     )
 
 
@@ -62,6 +62,7 @@ def trace_run(
 
     try:
         from langsmith import trace
+
         with trace(
             name=name,
             run_type=run_type,

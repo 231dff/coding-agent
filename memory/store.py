@@ -6,12 +6,13 @@
 
 生产环境用 Postgres，开发用 SQLite。
 """
+
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
 
 from langgraph.store.base import BaseStore
 
@@ -28,21 +29,25 @@ def create_store(
     """
     if backend == "memory":
         from langgraph.store.memory import InMemoryStore
+
         return InMemoryStore()
 
     if backend == "sqlite":
         from langgraph.store.sqlite import SqliteStore
+
         path = conn_string or ".agent_memory/store.db"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         return SqliteStore(conn_string=f"file:{path}")
 
     if backend == "postgres":
         from langgraph.store.postgres import PostgresStore
+
         dsn = conn_string or os.getenv("POSTGRES_DSN")
         if not dsn:
             raise ValueError("Postgres 需要 POSTGRES_DSN 或 conn_string")
         # 使用连接池
         from psycopg_pool import ConnectionPool
+
         pool = ConnectionPool(dsn, min_size=1, max_size=10)
         return PostgresStore(pool)
 

@@ -2,15 +2,13 @@
 
 Day 2 的文件工具改由沙箱 backend 执行，保证操作与隔离边界一致。
 """
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 from langchain.tools import tool
 
 from sandbox.base import Sandbox
 from sandbox.shell import ShellManager
-
 
 # 全局绑定，由 registry 在初始化时注入
 _SANDBOX: Sandbox | None = None
@@ -73,7 +71,7 @@ def sandbox_write(path: str, content: str) -> str:
     try:
         sandbox.write_file(path, content)
         return f"OK: 已写入 {path}"
-    except IOError as e:
+    except OSError as e:
         return f"ERROR: {e}"
 
 

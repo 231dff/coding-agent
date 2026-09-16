@@ -1,3 +1,11 @@
+---
+name: setup-matt-pocock-skills_triage-labels
+category: 用户主动触发
+description: setup-matt-pocock-skills 子文档：triage 标签。内部引用，不单独触发。
+disable_model_invocation: true
+hidden: true
+---
+
 # Triage Labels
 
 The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.

@@ -1,3 +1,10 @@
+---
+name: tdd_mocking
+category: 实现与测试
+description: TDD 子文档：mock 策略。内部引用，不单独触发。
+hidden: true
+---
+
 # When to Mock
 
 Mock at **system boundaries** only:

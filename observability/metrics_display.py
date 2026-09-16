@@ -3,15 +3,14 @@
 从 MetricsMiddleware 的队列消费事件，攒起来，由主流程在合适时机 flush，
 避免与 Rich Live 抢 Console 导致输出重复。
 """
+
 from __future__ import annotations
 
 import queue
 import threading
-from typing import Any
 
 from rich.console import Console
 from rich.text import Text
-
 
 DIM = "grey54"
 
@@ -61,7 +60,7 @@ class MetricsDisplay:
     - 改为缓存 + 主动 flush，Live 期间绝对不打印，输出干净。
     """
 
-    def __init__(self, metrics_queue: "queue.Queue[dict] | None", console: Console):
+    def __init__(self, metrics_queue: queue.Queue[dict] | None, console: Console):
         self.queue = metrics_queue
         self.console = console
         self._stop = threading.Event()
@@ -77,9 +76,7 @@ class MetricsDisplay:
     def start(self) -> None:
         if self.queue is None:
             return
-        self._thread = threading.Thread(
-            target=self._run, name="metrics-display", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="metrics-display", daemon=True)
         self._thread.start()
 
     def stop(self, timeout: float = 1.0) -> None:
@@ -138,9 +135,7 @@ class MetricsDisplay:
             self.console.print(f"[{DIM}]暂无指标记录[/]")
             return
 
-        total_cost = sum(
-            e.get("cost_usd", 0) for e in items if e.get("type") == "llm"
-        )
+        total_cost = sum(e.get("cost_usd", 0) for e in items if e.get("type") == "llm")
         llm_count = sum(1 for e in items if e.get("type") == "llm")
         tool_count = sum(1 for e in items if e.get("type") == "tool")
 

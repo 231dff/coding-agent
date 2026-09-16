@@ -1,16 +1,16 @@
 """Agent 配置。
 
 配置分层（从高到低）：
-1. 项目级 <project>/.coding-agent/config.yaml  — provider/model/temperature 等
-2. 全局   ~/.coding-agent/config.yaml            — 全局默认（可选）
-3. API Key ~/.coding-agent/credentials.yaml     — 各 provider 的 key
+1. 项目级 <project>/.coding-agent/config.yaml
+2. 全局   ~/.coding-agent/config.yaml
+3. API Key ~/.coding-agent/credentials.yaml
 4. 环境变量 AGENT_* / DASHSCOPE_API_KEY 等
-5. .env                                         — 兼容旧配置
+5. .env
 6. 硬编码默认值
 
-temperature 可为 None —— 表示不发送该参数（兼容 kimi-k3、o1 等不支持
-temperature 的模型）。
+temperature 可为 None —— 表示不发送该参数。
 """
+
 from __future__ import annotations
 
 import os
@@ -19,12 +19,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-
 _AGENT_HOME = Path(__file__).resolve().parent.parent
 
 
 def _load_env() -> None:
-    """加载 Agent 自身目录的 .env（作为兜底，不覆盖已有环境变量）。"""
     agent_env = _AGENT_HOME / ".env"
     if agent_env.exists():
         load_dotenv(dotenv_path=agent_env, override=False)
@@ -39,6 +37,7 @@ _load_env()
 # 配置文件路径
 # ============================================================
 
+
 def global_config_file() -> Path:
     return Path.home() / ".coding-agent" / "config.yaml"
 
@@ -52,6 +51,7 @@ def load_yaml_config(path: Path) -> dict:
         return {}
     try:
         import yaml
+
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
@@ -60,6 +60,7 @@ def load_yaml_config(path: Path) -> dict:
 
 def save_yaml_config(path: Path, data: dict) -> None:
     import yaml
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
@@ -71,12 +72,8 @@ def save_yaml_config(path: Path, data: dict) -> None:
 # 项目路径解析
 # ============================================================
 
-def resolve_project_path(explicit: str | Path | None = None) -> Path:
-    """解析用户项目路径。
 
-    优先级：显式参数 > AGENT_PROJECT 环境变量 > 当前工作目录。
-    拒绝解析到 Agent 自身目录。
-    """
+def resolve_project_path(explicit: str | Path | None = None) -> Path:
     if explicit is not None:
         candidate = Path(explicit).resolve()
     elif os.getenv("AGENT_PROJECT"):
@@ -106,36 +103,27 @@ def resolve_project_path(explicit: str | Path | None = None) -> Path:
 # API Key 加载
 # ============================================================
 
-def _load_api_key(provider_id: str = "", env_key: str = "") -> str:
-    """按优先级加载 API Key。
 
-    1. 全局凭据文件里该 provider 的 key
-    2. 该 provider 对应的环境变量
-    3. AGENT_API_KEY 显式指定
-    4. 常见环境变量（兜底）
-    """
-    # 1. 全局凭据
+def _load_api_key(provider_id: str = "", env_key: str = "") -> str:
     if provider_id:
         try:
             from agent.credentials import get_api_key
+
             key = get_api_key(provider_id)
             if key:
                 return key
         except Exception:
             pass
 
-    # 2. provider 特定环境变量
     if env_key:
         key = os.getenv(env_key, "")
         if key:
             return key
 
-    # 3. AGENT_API_KEY 显式指定
     explicit = os.getenv("AGENT_API_KEY", "")
     if explicit:
         return explicit
 
-    # 4. 常见环境变量兜底
     for name in (
         "DASHSCOPE_API_KEY",
         "OPENAI_API_KEY",
@@ -154,16 +142,11 @@ def _load_api_key(provider_id: str = "", env_key: str = "") -> str:
 
 
 # ============================================================
-# temperature 解析辅助
+# 解析辅助
 # ============================================================
 
-def _parse_temperature(raw) -> float | None:
-    """解析 temperature。
 
-    None / 空字符串 / "none" / "default" → None（不发送该参数）
-    有效数字 → float
-    无效值 → None（降级为不发送）
-    """
+def _parse_temperature(raw) -> float | None:
     if raw is None:
         return None
     if isinstance(raw, str):
@@ -180,34 +163,52 @@ def _parse_temperature(raw) -> float | None:
         return None
 
 
+def _parse_bool(raw, default: bool = False) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    s = str(raw).strip().lower()
+    if s in ("true", "1", "yes", "y", "on"):
+        return True
+    if s in ("false", "0", "no", "n", "off", ""):
+        return False
+    return default
+
+
 # ============================================================
 # AgentConfig
 # ============================================================
+
 
 @dataclass
 class AgentConfig:
     """Agent 运行时配置。"""
 
-    # 路径
     project_path: Path
     agent_home: Path
 
-    # 模型
     model: str
-    model_provider: str          # openai / anthropic
-    provider_id: str             # qwen / openai / deepseek / ...
+    model_provider: str
+    provider_id: str
     base_url: str
     api_key: str
     model_window: int
-    # None = 不发送 temperature 参数（兼容部分模型）
     temperature: float | None
     timeout: int
 
-    # 运行限制
     max_iterations: int = 25
     verbose: bool = True
     strict_lint: bool = False
     enable_mcp: bool = False
+
+    _meta_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _index_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _trajectory_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _memory_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _session_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
 
     # ========================================================
     # 加载器
@@ -218,16 +219,7 @@ class AgentConfig:
         cls,
         project_path: str | Path | None = None,
         **overrides,
-    ) -> "AgentConfig":
-        """从多级配置加载 AgentConfig。
-
-        优先级：
-        1. overrides（显式传入）
-        2. 项目级配置
-        3. 全局配置
-        4. 环境变量
-        5. 硬编码默认值
-        """
+    ) -> AgentConfig:
         pp = resolve_project_path(project_path)
 
         proj_cfg = load_yaml_config(project_config_file(pp))
@@ -247,13 +239,12 @@ class AgentConfig:
 
         provider_id = get("provider", "qwen")
 
-        # 从 providers 表查默认 langchain_provider
         from agent.providers import get_provider
+
         provider_info = get_provider(provider_id)
 
-        model_provider = (
-            get("langchain_provider")
-            or (provider_info.langchain_provider if provider_info else "openai")
+        model_provider = get("langchain_provider") or (
+            provider_info.langchain_provider if provider_info else "openai"
         )
 
         env_key = provider_info.env_key if provider_info else ""
@@ -265,10 +256,7 @@ class AgentConfig:
 
         default_model = provider_info.default_model if provider_info else "qwen-max"
 
-        # temperature 解析：None 表示不发送
-        temperature = _parse_temperature(
-            get("temperature", None)
-        )
+        temperature = _parse_temperature(get("temperature", None))
 
         return cls(
             project_path=pp,
@@ -282,13 +270,43 @@ class AgentConfig:
             temperature=temperature,
             timeout=int(get("timeout", 120)),
             max_iterations=int(get("max_iterations", 25)),
-            verbose=str(get("verbose", "true")).lower() == "true",
-            strict_lint=str(get("strict_lint", "false")).lower() == "true",
-            enable_mcp=str(get("enable_mcp", "false")).lower() == "true",
+            verbose=_parse_bool(get("verbose", "true"), default=True),
+            strict_lint=_parse_bool(get("strict_lint", "false"), default=False),
+            enable_mcp=_parse_bool(get("enable_mcp", "false"), default=False),
+        )
+
+    @classmethod
+    def for_test(
+        cls,
+        workspace: str | Path,
+        model: str = "openai:gpt-4o",
+    ) -> AgentConfig:
+        """测试专用构造器：模拟老接口 AgentConfig(workspace=..., model=...)。
+
+        Args:
+            workspace: 项目路径。
+            model: 形如 "openai:gpt-5.5" 的字符串。
+        """
+        provider_id = "openai"
+        model_name = model
+        if ":" in model:
+            provider_id, model_name = model.split(":", 1)
+
+        return cls(
+            project_path=Path(workspace).resolve(),
+            agent_home=_AGENT_HOME,
+            model=model_name,
+            model_provider="openai",
+            provider_id=provider_id,
+            base_url="",
+            api_key="dummy",
+            model_window=200000,
+            temperature=None,
+            timeout=120,
         )
 
     # ========================================================
-    # 派生路径
+    # 派生路径（带缓存）
     # ========================================================
 
     @property
@@ -297,25 +315,43 @@ class AgentConfig:
 
     @property
     def meta_dir(self) -> Path:
-        d = self.project_path / ".coding-agent"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        if self._meta_dir_cache is None:
+            d = self.project_path / ".coding-agent"
+            d.mkdir(parents=True, exist_ok=True)
+            object.__setattr__(self, "_meta_dir_cache", d)
+        return self._meta_dir_cache
 
     @property
     def index_dir(self) -> Path:
-        return self.meta_dir / "index"
+        if self._index_dir_cache is None:
+            d = self.meta_dir / "index"
+            d.mkdir(parents=True, exist_ok=True)
+            object.__setattr__(self, "_index_dir_cache", d)
+        return self._index_dir_cache
 
     @property
     def trajectory_dir(self) -> Path:
-        return self.meta_dir / "trajectories"
+        if self._trajectory_dir_cache is None:
+            d = self.meta_dir / "trajectories"
+            d.mkdir(parents=True, exist_ok=True)
+            object.__setattr__(self, "_trajectory_dir_cache", d)
+        return self._trajectory_dir_cache
 
     @property
     def memory_dir(self) -> Path:
-        return self.meta_dir / "memory"
+        if self._memory_dir_cache is None:
+            d = self.meta_dir / "memory"
+            d.mkdir(parents=True, exist_ok=True)
+            object.__setattr__(self, "_memory_dir_cache", d)
+        return self._memory_dir_cache
 
     @property
     def session_dir(self) -> Path:
-        return self.meta_dir / "sessions"
+        if self._session_dir_cache is None:
+            d = self.meta_dir / "sessions"
+            d.mkdir(parents=True, exist_ok=True)
+            object.__setattr__(self, "_session_dir_cache", d)
+        return self._session_dir_cache
 
     # ========================================================
     # 校验
@@ -329,17 +365,16 @@ class AgentConfig:
         if not self.project_path.is_dir():
             raise ValueError(f"项目路径不存在: {self.project_path}")
         if not self.api_key and self.provider_id != "ollama":
-            raise ValueError(
-                f"API Key 未设置。\n"
-                f"请重新运行 `coding-agent` 触发配置向导。"
-            )
+            raise ValueError("API Key 未设置。\n请重新运行 `coding-agent` 触发配置向导。")
         if self.temperature is not None:
             if self.temperature < 0 or self.temperature > 2:
-                raise ValueError(
-                    f"temperature 必须在 [0, 2]: {self.temperature}"
-                )
+                raise ValueError(f"temperature 必须在 [0, 2]: {self.temperature}")
         if self.timeout < 10:
             raise ValueError(f"timeout 至少 10 秒: {self.timeout}")
+        if self.model_window < 1000:
+            raise ValueError(f"model_window 至少 1000: {self.model_window}")
+        if self.max_iterations < 1:
+            raise ValueError(f"max_iterations 至少 1: {self.max_iterations}")
 
     def to_dict(self) -> dict:
         return {
@@ -351,9 +386,7 @@ class AgentConfig:
             "base_url": self.base_url,
             "api_key": "***" if self.api_key else "(empty)",
             "model_window": self.model_window,
-            "temperature": (
-                self.temperature if self.temperature is not None else "(不发送)"
-            ),
+            "temperature": (self.temperature if self.temperature is not None else "(不发送)"),
             "timeout": self.timeout,
             "max_iterations": self.max_iterations,
             "enable_mcp": self.enable_mcp,
@@ -362,15 +395,20 @@ class AgentConfig:
     def ensure_gitignore(self) -> None:
         gitignore = self.project_path / ".gitignore"
         entry = ".coding-agent/"
-        if gitignore.exists():
-            content = gitignore.read_text(encoding="utf-8")
-            if entry not in content:
+
+        try:
+            if gitignore.exists():
+                content = gitignore.read_text(encoding="utf-8")
+                if entry in content:
+                    return
                 if not content.endswith("\n"):
                     content += "\n"
                 content += f"\n# Agent metadata\n{entry}\n"
                 gitignore.write_text(content, encoding="utf-8")
-        else:
-            gitignore.write_text(
-                f"# Agent metadata\n{entry}\n",
-                encoding="utf-8",
-            )
+            else:
+                gitignore.write_text(
+                    f"# Agent metadata\n{entry}\n",
+                    encoding="utf-8",
+                )
+        except Exception:
+            pass
