@@ -1,4 +1,31 @@
-"""agent/core.py — Coding Agent 装配入口。"""
+"""agent/core.py — Coding Agent 装配入口。
+
+核心设计：
+- agent_home:   Agent 自身代码路径（只读，加载 prompts/queries）
+- project_path: 用户项目路径（Agent 操作对象）
+- meta_dir:     Agent 元数据目录（用户项目内的 .coding-agent/）
+
+集成：
+- 多 Provider 模型支持
+- 沙箱工厂（SandboxPool）
+- 条件化思考（ThinkingRouter）
+- Content 剥离（ContentStripper）
+- 会话持久化（SQLite checkpointer）
+- 双层记忆：
+  * Layer 1: Advanced JSON Cards（全局，常驻 system prompt）
+  * Layer 2: 会话摘要 + 上下文感知检索（按需注入）
+- LangGraph Store 后端（sqlite / postgres / memory 可切换）
+
+兼容性：
+- temperature 为 None 时不发送
+- api_key 为空时用 "dummy"
+- AgentRuntime 转发 invoke / stream / astream_events
+
+缓存友好设计：
+- 中间件顺序：思考路由 → content 剥离 → 检索注入 → 压缩 → 过滤 → 指标 → 工具层 → 状态栏 → 轨迹 → 缓存标记
+- 工具集按字母序排序
+- 状态栏移除时间戳类字段
+"""
 
 from __future__ import annotations
 
@@ -24,39 +51,57 @@ from codebase.indexer import (
     create_index_status_tool,
     create_search_tool,
 )
+
+# ---------- 代码库分析 ----------
 from codebase.parser import CodeParser
 from codebase.repo_map import RepoMapBuilder, create_repo_map_tool
+
+# ---------- 上下文 ----------
 from context.assembly import ContextAssembler
 from context.status_bar import AgentStatusBar
 
-# ★ 优先级 3：工程经验
-from memory.lesson_extractor import load_lessons
-
-# ★ 优先级 2：用户偏好
-from memory.user_preference import load_user_memory
+# ---------- 记忆（双层架构）----------
+from memory.cards import user_card_repo
+from memory.store import (
+    get_store as get_memory_store,
+)
+from memory.store import (
+    store_backend_info,
+)
 from middleware.circuit_breaker import CircuitBreakerConfig, CircuitBreakerMiddleware
 from middleware.content_stripper import create_content_stripper_middleware
 from middleware.context_compaction import (
     CompactionPipelineConfig,
     ContextCompactionMiddleware,
 )
+
+# ---------- 中间件 ----------
 from middleware.dependency_check import create_dependency_check_middleware
 from middleware.metrics import MetricsMiddleware
 from middleware.prompt_cache import create_prompt_cache_middleware
+from middleware.retrieval_inject import create_retrieval_inject_middleware
 from middleware.status_bar import StatusBarMiddleware
 from middleware.thinking_router import create_thinking_router_middleware
 from middleware.tool_filter import create_tool_filter_middleware
 from middleware.tool_search import create_tool_search_tool
 from middleware.trajectory import TrajectoryMiddleware
+
+# ---------- 可观测性 ----------
 from observability.trajectory_writer import TrajectoryWriter
+
+# ---------- 沙箱 ----------
 from sandbox.docker_backend import DockerSandbox
 from sandbox.patch import create_apply_patch_tool
 from sandbox.pool import SandboxPool
 from skills.loader import create_load_skill_tool
+
+# ---------- 技能 ----------
 from skills.registry import SkillRegistry
 from tools.context_ops import CONTEXT_TOOLS
 from tools.context_ops import bind as bind_context
 from tools.lint import validate_tools
+
+# ---------- 工具 ----------
 from tools.registry import build_default_tools
 from tools.sandbox_ops import SANDBOX_TOOLS
 from tools.sandbox_ops import bind as bind_sandbox
@@ -74,6 +119,7 @@ from tools.test_ops import bind as bind_test
 from tools.transaction_ops import TRANSACTION_TOOLS
 from tools.transaction_ops import bind as bind_tx
 
+# ---------- MCP ----------
 try:
     from mcp_client.client import MCPConfig, load_mcp_tools_sync
 
@@ -88,7 +134,7 @@ except ImportError as _e:
 
 
 # ============================================================
-# 全局沙箱工厂
+# 全局沙箱工厂（进程级单例）
 # ============================================================
 
 _SANDBOX_POOL: SandboxPool | None = None
@@ -96,6 +142,7 @@ _SANDBOX_POOL_LOCK = threading.Lock()
 
 
 def _get_sandbox_pool() -> SandboxPool:
+    """返回进程级沙箱工厂。"""
     global _SANDBOX_POOL
     with _SANDBOX_POOL_LOCK:
         if _SANDBOX_POOL is None:
@@ -239,6 +286,8 @@ def _build_compaction_llm(cfg: AgentConfig):
 
 @dataclass
 class AgentRuntime:
+    """Agent 运行时句柄。"""
+
     agent: Any
     sandbox: DockerSandbox
     assembler: ContextAssembler
@@ -256,6 +305,8 @@ class AgentRuntime:
     _planning_graph: Any = field(default=None, init=False, repr=False)
     _repair_graph: Any = field(default=None, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
+
+    # ---------- 转发到底层 agent ----------
 
     def invoke(self, *args, **kwargs):
         return self.agent.invoke(*args, **kwargs)
@@ -275,6 +326,11 @@ class AgentRuntime:
     async def astream_events(self, *args, **kwargs):
         return await self.agent.astream_events(*args, **kwargs)
 
+    def get_state(self, *args, **kwargs):
+        return self.agent.get_state(*args, **kwargs)
+
+    # ---------- 懒加载图 ----------
+
     @property
     def planning_graph(self):
         if self._planning_graph is None:
@@ -293,6 +349,8 @@ class AgentRuntime:
 
             self._repair_graph = build_repair_graph(self.agent, _exec, self.checkpointer)
         return self._repair_graph
+
+    # ---------- 生命周期 ----------
 
     def close(self) -> None:
         if self._closed:
@@ -324,6 +382,8 @@ class AgentRuntime:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
+    # ---------- 状态查询 ----------
+
     def check_prefix_stability(self) -> bool:
         return self.assembler.check_prefix_stability()
 
@@ -337,6 +397,7 @@ class AgentRuntime:
 
 
 def build_agent(cfg: AgentConfig) -> AgentRuntime:
+    """组装完整的 Coding Agent。"""
     from observability.logger import get_logger
 
     log = get_logger("core")
@@ -355,6 +416,12 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     llm = build_llm(cfg)
     compaction_llm = _build_compaction_llm(cfg)
     checkpointer = build_checkpointer(cfg.meta_dir)
+
+    # 初始化 memory store（首次调用会按环境变量选择后端）
+    try:
+        _ = get_memory_store()
+    except Exception as e:
+        log.warning("memory_store_init_failed", error=str(e))
 
     # ---------- 1. 沙箱 ----------
     sandbox_from_pool = False
@@ -475,17 +542,14 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     if project_memory:
         system_prompt = f"{system_prompt}\n\n## Project Memory\n{project_memory}"
 
-    # ★ 优先级 2：注入用户偏好（跨会话记忆）
+    # ★ 第 1 层记忆：用户卡片（全局，全量注入，按 confidence 排序截断）
     if os.getenv("AGENT_USER_MEMORY", "true").lower() == "true":
-        user_pref = load_user_memory(cfg.meta_dir)
-        if user_pref:
-            system_prompt = f"{system_prompt}\n\n{user_pref}"
-
-    # ★ 优先级 3：注入工程经验（从轨迹中提炼）
-    if os.getenv("AGENT_LESSONS", "true").lower() == "true":
-        lessons = load_lessons(cfg.meta_dir)
-        if lessons:
-            system_prompt = f"{system_prompt}\n\n{lessons}"
+        try:
+            cards_text = user_card_repo().render_prompt(max_cards=40)
+            if cards_text:
+                system_prompt = f"{system_prompt}\n\n## 用户记忆\n{cards_text}"
+        except Exception as e:
+            log.warning("user_cards_inject_failed", error=str(e))
 
     skill_meta = skill_registry.metadata_prompt()
     if skill_meta:
@@ -531,30 +595,42 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     )
 
     middlewares = [
+        # 1. 条件化思考（最先跑，读原始 user 消息）
         create_thinking_router_middleware(
             provider=cfg.provider_id,
             enabled=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
             strategy=os.getenv("AGENT_THINKING_STRATEGY", "auto"),
         ),
+        # 2. Content 剥离（清除带 tool_calls 的历史 AI content）
         create_content_stripper_middleware(
             enabled=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
         ),
+        # 3. 第 2 层记忆：检索注入（按当前任务找相关历史会话）
+        create_retrieval_inject_middleware(
+            enabled=(os.getenv("AGENT_RETRIEVAL", "true").lower() == "true"),
+            top_k=int(os.getenv("AGENT_RETRIEVAL_TOP_K", "3")),
+        ),
+        # 4. 会重写请求的中间件
         ContextCompactionMiddleware(
             model=compaction_llm,
             workspace=str(cfg.project_path),
             config=CompactionPipelineConfig(model_window=cfg.model_window),
         ),
         create_tool_filter_middleware(all_tool_names, skill_tool_map),
+        # 5. 指标采集
         MetricsMiddleware(
             store=metrics_store,
             model_name=cfg.model,
             debug=False,
             on_metric=_on_metric,
         ),
+        # 6. 工具层中间件
         create_dependency_check_middleware(analyzer),
         circuit_breaker,
+        # 7. 只追加/只读的中间件
         StatusBarMiddleware(status_bar),
         trajectory_mw,
+        # 8. 缓存标记（最后跑）
         create_prompt_cache_middleware(
             cache_ttl="5m",
             default_cache_key="coding-agent-v1",
@@ -571,6 +647,9 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         checkpointer=checkpointer,
     )
 
+    # ---------- 15. 日志 ----------
+    backend_info = store_backend_info()
+
     log.info(
         "agent_build_done",
         tools=len(tools),
@@ -578,12 +657,15 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         mcp_tools=len(mcp_tools),
         thinking_router=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
         content_stripper=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
+        retrieval=(os.getenv("AGENT_RETRIEVAL", "true").lower() == "true"),
         user_memory=(os.getenv("AGENT_USER_MEMORY", "true").lower() == "true"),
-        lessons=os.getenv("AGENT_LESSONS", "true").lower() == "true",
+        memory_backend=backend_info.get("backend", "?"),
+        memory_type=backend_info.get("type", "?"),
         checkpoint_db=str(cfg.meta_dir / "sessions" / "checkpoints.db"),
         elapsed_s=round(time.time() - t0, 2),
     )
 
+    # ---------- 16. 返回运行时 ----------
     return AgentRuntime(
         agent=agent,
         sandbox=sandbox,

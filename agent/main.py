@@ -1,4 +1,9 @@
-"""Agent CLI 入口。"""
+"""Agent CLI 入口。
+
+用法：
+    coding-agent init [--project PATH]
+    coding-agent [--project PATH] [--model MODEL] [task]
+"""
 
 from __future__ import annotations
 
@@ -20,15 +25,18 @@ from rich.text import Text
 from agent.config import AgentConfig, resolve_project_path
 from agent.core import build_agent
 from agent.setup_wizard import maybe_run_first_time_setup, run_setup_wizard
+from memory.card_extractor import extract_and_save
 
-# ★ 优先级 3：工程经验
-from memory.lesson_extractor import (
-    extract_lessons_from_trajectories,
-    merge_into_lessons,
+# ---------- 双层记忆 ----------
+from memory.cards import user_card_repo
+from memory.session_summary import (
+    session_summary_repo,
+    summarize_session,
 )
-
-# ★ 优先级 2：用户偏好
-from memory.user_preference import extract_preferences, merge_into_user_memory
+from memory.store import (
+    current_user_id,
+    store_backend_info,
+)
 from observability.logger import bind_context, configure_logging, get_logger
 from observability.metrics_display import MetricsDisplay
 from observability.tracing import configure as configure_tracing
@@ -47,7 +55,7 @@ BANNER = """[bold cyan]
 
 
 # ============================================================
-# 默认 thread_id
+# 默认 thread_id：按项目路径生成稳定 ID（跨重启恢复）
 # ============================================================
 
 
@@ -75,6 +83,10 @@ def print_welcome(project_path: Path, rt) -> None:
             f"{stats['user_invoked']} 个用户触发[/dim]"
         )
 
+    # 记忆后端
+    info = store_backend_info()
+    console.print(f"[dim]记忆: {info.get('backend', '?')} ({info.get('type', '?')})[/dim]")
+
     if is_enabled():
         console.print(f"[dim]LangSmith: {status_text()}[/dim]")
 
@@ -92,6 +104,9 @@ def print_help() -> None:
             "  /config       显示当前配置\n"
             "  /metrics      显示本次会话指标\n"
             "  /trace        查看最近的调用指标\n"
+            "  /cards        查看用户卡片（第 1 层记忆）\n"
+            "  /recall <q>   检索历史会话（第 2 层记忆）\n"
+            "  /memory       查看记忆后端状态\n"
             "  /learn        从历史轨迹提炼工程经验\n"
             "  /<skill-name> 加载 user-invoked 技能\n"
             "  其他输入       作为任务发送给 Agent",
@@ -152,6 +167,201 @@ def show_metrics(rt) -> None:
 
 def show_trace(display: MetricsDisplay) -> None:
     display.dump_recent(30)
+
+
+# ============================================================
+# ★ 记忆相关命令
+# ============================================================
+
+
+def show_cards() -> None:
+    """展示当前用户的卡片（第 1 层）。"""
+    try:
+        repo = user_card_repo()
+        cards = repo.load_active()
+    except Exception as e:
+        console.print(f"[red]读取卡片失败: {e}[/red]")
+        return
+
+    if not cards:
+        console.print("[dim]暂无卡片。跑几次任务后会自动生成。[/dim]")
+        return
+
+    groups: dict[str, list] = {}
+    for c in cards:
+        groups.setdefault(c.category, []).append(c)
+
+    lines = [f"[bold]共 {len(cards)} 条卡片[/bold]", ""]
+    for cat, items in sorted(groups.items()):
+        lines.append(f"[bold cyan]## {cat}[/bold cyan]")
+        for c in items:
+            conf = f" [dim]({c.confidence:.2f})[/dim]" if c.confidence < 0.8 else ""
+            lines.append(f"  {c.fact}{conf}")
+        lines.append("")
+    console.print(Panel("\n".join(lines), title="用户卡片（第 1 层）"))
+
+
+def show_recall(query: str) -> None:
+    """检索历史会话（第 2 层）。"""
+    try:
+        from memory.retriever import get_retriever
+
+        items = get_retriever(user_id=current_user_id()).search(
+            query=query,
+            top_k=5,
+        )
+    except Exception as e:
+        console.print(f"[red]检索失败: {e}[/red]")
+        return
+
+    if not items:
+        console.print("[dim]未找到相关历史会话[/dim]")
+        return
+
+    lines = [f"[bold]查询:[/bold] {query}", ""]
+    for i, item in enumerate(items, 1):
+        lines.append(f"[bold cyan]{i}. [{item.task_type}] score={item.score}[/bold cyan]")
+        lines.append(f"   {item.summary}")
+        lines.append("")
+    console.print(Panel("\n".join(lines), title="历史会话检索（第 2 层）"))
+
+
+def show_memory_status() -> None:
+    """显示记忆后端状态。"""
+    info = store_backend_info()
+    user_id = current_user_id()
+
+    try:
+        n_cards = len(user_card_repo(user_id=user_id).load_active())
+    except Exception:
+        n_cards = "?"
+
+    try:
+        n_summaries = len(session_summary_repo(user_id=user_id).load_all())
+    except Exception:
+        n_summaries = "?"
+
+    from memory.store import agent_home
+
+    console.print(
+        Panel(
+            f"  [bold]后端:[/bold] {info.get('backend', '?')} "
+            f"({info.get('type', '?')})\n"
+            f"  [bold]用户:[/bold] {user_id}\n"
+            f"  [bold]存储根:[/bold] {agent_home()}\n"
+            f"\n"
+            f"  [bold]第 1 层（卡片）:[/bold] {n_cards} 条\n"
+            f"  [bold]第 2 层（会话摘要）:[/bold] {n_summaries} 条\n"
+            f"\n"
+            f"  [dim]切换后端:[/dim]\n"
+            f"  [dim]  AGENT_STORE_BACKEND=sqlite|postgres|memory[/dim]\n"
+            f"  [dim]  AGENT_STORE_DSN=...[/dim]\n"
+            f"  [dim]  POSTGRES_DSN=postgresql://...[/dim]",
+            title="长期记忆",
+        )
+    )
+
+
+# ============================================================
+# 会话结束钩子：提炼卡片 + 生成会话摘要
+# ============================================================
+
+
+def extract_and_save_memory(rt, thread_id: str) -> None:
+    """会话结束时：
+    1. 提炼用户卡片（第 1 层）
+    2. 生成会话摘要（第 2 层的原始数据）
+    """
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        state = rt.agent.get_state(config)
+        if state is None or not state.values:
+            return
+
+        messages = state.values.get("messages", [])
+        if not messages or len(messages) < 4:
+            return
+
+        from agent.core import _build_compaction_llm
+
+        llm = _build_compaction_llm(rt.config)
+
+        user_id = current_user_id()
+        project_path = str(rt.config.project_path)
+
+        # ---------- 1. 提炼卡片 ----------
+        if os.getenv("AGENT_USER_MEMORY", "true").lower() == "true":
+            try:
+                console.print("[dim]正在提炼用户卡片…[/dim]")
+                added, skipped = extract_and_save(
+                    llm,
+                    messages,
+                    session_id=thread_id,
+                )
+                if added:
+                    console.print(f"[dim]新增 {added} 条卡片（跳过 {skipped} 条重复）[/dim]")
+                else:
+                    console.print("[dim]本次会话无新增卡片[/dim]")
+            except Exception as e:
+                log.warning("card_extraction_failed", error=str(e))
+
+        # ---------- 2. 生成会话摘要 ----------
+        if os.getenv("AGENT_RETRIEVAL", "true").lower() == "true":
+            try:
+                console.print("[dim]正在生成会话摘要…[/dim]")
+                summary = summarize_session(
+                    llm,
+                    messages,
+                    session_id=thread_id,
+                    user_id=user_id,
+                    project_path=project_path,
+                )
+                if summary and summary.summary:
+                    session_summary_repo(user_id=user_id).add(summary)
+                    console.print(f"[dim]会话摘要已保存 （{summary.task_type}）[/dim]")
+            except Exception as e:
+                log.warning("session_summary_failed", error=str(e))
+
+    except Exception as e:
+        log.warning("memory_extraction_failed", error=str(e))
+
+
+# ============================================================
+# /learn 命令：从轨迹提炼工程经验（旧版功能保留）
+# ============================================================
+
+
+def learn_from_trajectories(rt) -> None:
+    """从最近的轨迹里提炼工程经验（可选，独立于卡片系统）。"""
+    try:
+        from memory.lesson_extractor import (
+            extract_lessons_from_trajectories,
+            merge_into_lessons,
+        )
+    except ImportError:
+        console.print("[yellow]lesson_extractor 未安装，跳过[/yellow]")
+        return
+
+    traj_dir = rt.config.trajectory_dir
+
+    from agent.core import _build_compaction_llm
+
+    llm = _build_compaction_llm(rt.config)
+
+    console.print("[dim]正在分析最近的成功轨迹…[/dim]")
+    extracted = extract_lessons_from_trajectories(llm, traj_dir)
+
+    if not extracted:
+        console.print("[dim]未找到可提炼的成功轨迹[/dim]")
+        return
+
+    merge_into_lessons(rt.config.meta_dir, extracted)
+    console.print(f"[dim]工程经验已更新: {rt.config.meta_dir / 'memory' / 'lessons.md'}[/dim]")
+
+
+# ============================================================
+# 参数解析
+# ============================================================
 
 
 def parse_agent_args() -> argparse.Namespace:
@@ -243,6 +453,14 @@ def _dedup_repeats(text: str) -> str:
 
 
 def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
+    """流式调用 Agent，实时展示 reasoning 和 content。
+
+    关键设计：
+    - 只用 stream_mode="messages"
+    - 工具事件从 ToolMessage 取，按名字去重
+    - pending_content 暂存当前轮，收到 ToolMessage 时按标记决定归属
+    - 有 tool_calls 的轮次 content 不进最终结果
+    """
     reasoning_buf: list[str] = []
     content_buf: list[str] = []
     pending_content: list[str] = []
@@ -340,86 +558,6 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
 
 
 # ============================================================
-# ★ 优先级 2：会话结束提炼用户偏好
-# ============================================================
-
-
-def extract_and_save_preferences(rt, thread_id: str) -> None:
-    """会话结束时提炼用户偏好，追加到 user.md。"""
-    if os.getenv("AGENT_USER_MEMORY", "true").lower() != "true":
-        return
-
-    try:
-        config = {"configurable": {"thread_id": thread_id}}
-        state = rt.agent.get_state(config)
-        if state is None or not state.values:
-            return
-
-        messages = state.values.get("messages", [])
-        if not messages or len(messages) < 4:
-            return
-
-        from agent.core import _build_compaction_llm
-
-        llm = _build_compaction_llm(rt.config)
-
-        console.print("[dim]正在提炼用户偏好…[/dim]")
-        extracted = extract_preferences(llm, messages)
-
-        if not extracted:
-            console.print("[dim]本次会话无新增偏好[/dim]")
-            return
-
-        merge_into_user_memory(rt.config.meta_dir, extracted)
-        console.print(f"[dim]用户偏好已更新: {rt.config.meta_dir / 'memory' / 'user.md'}[/dim]")
-    except Exception as e:
-        log.warning(
-            "preference_extraction_failed",
-            error_type=type(e).__name__,
-            error=str(e),
-        )
-
-
-# ============================================================
-# ★ 优先级 3：从轨迹提炼工程经验
-# ============================================================
-
-
-def learn_from_trajectories(rt) -> None:
-    """从最近的轨迹里提炼工程经验。
-
-    用户主动触发（/learn 命令），不从会话钩子调用。
-    """
-    if os.getenv("AGENT_LESSONS", "true").lower() != "true":
-        console.print("[dim]AGENT_LESSONS=false，已跳过[/dim]")
-        return
-
-    try:
-        traj_dir = rt.config.trajectory_dir
-
-        from agent.core import _build_compaction_llm
-
-        llm = _build_compaction_llm(rt.config)
-
-        console.print("[dim]正在分析最近的成功轨迹…[/dim]")
-        extracted = extract_lessons_from_trajectories(llm, traj_dir)
-
-        if not extracted:
-            console.print("[dim]未找到可提炼的成功轨迹[/dim]")
-            return
-
-        merge_into_lessons(rt.config.meta_dir, extracted)
-        console.print(f"[dim]工程经验已更新: {rt.config.meta_dir / 'memory' / 'lessons.md'}[/dim]")
-    except Exception as e:
-        log.warning(
-            "lesson_extraction_failed",
-            error_type=type(e).__name__,
-            error=str(e),
-        )
-        console.print(f"[red]提炼失败: {e}[/red]")
-
-
-# ============================================================
 # 单次任务 / 交互模式
 # ============================================================
 
@@ -479,6 +617,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 
         lower_input = user_input.lower()
 
+        # ---------- 内置命令 ----------
         if lower_input in ("/exit", "/quit", "exit", "quit"):
             console.print("[dim]再见[/dim]")
             break
@@ -501,11 +640,26 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         if lower_input == "/trace":
             show_trace(display)
             continue
-        # ★ 优先级 3：从轨迹提炼经验
+
+        # ---------- 记忆相关 ----------
+        if lower_input == "/cards":
+            show_cards()
+            continue
+        if lower_input == "/memory":
+            show_memory_status()
+            continue
         if lower_input == "/learn":
             learn_from_trajectories(rt)
             continue
+        if lower_input.startswith("/recall"):
+            q = user_input[len("/recall") :].strip()
+            if q:
+                show_recall(q)
+            else:
+                console.print("[red]用法: /recall <查询词>[/red]")
+            continue
 
+        # ---------- 用户主动触发的 skill ----------
         task_text = user_input
         if user_input.startswith("/"):
             handled = handle_user_invoked_skill(rt, user_input)
@@ -620,9 +774,9 @@ def main() -> int:
             print_welcome(project_path, rt)
             run_interactive(rt, thread_id, display)
     finally:
-        # ★ 优先级 2：会话结束提炼用户偏好（失败不阻塞退出）
+        # 会话结束钩子：提炼卡片 + 生成摘要
         try:
-            extract_and_save_preferences(rt, thread_id)
+            extract_and_save_memory(rt, thread_id)
         except Exception:
             pass
 
