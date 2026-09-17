@@ -1,5 +1,4 @@
 """agent/core.py — Coding Agent 装配入口。"""
-
 from __future__ import annotations
 
 import concurrent.futures
@@ -15,72 +14,69 @@ from langchain.agents import create_agent
 
 from agent.checkpointer import build_checkpointer
 from agent.config import AgentConfig
-from codebase.background_indexer import BackgroundIndexer
-from codebase.call_graph import CallGraph, create_call_tools
+
+from sandbox.docker_backend import DockerSandbox
+from sandbox.pool import SandboxPool
+from sandbox.patch import create_apply_patch_tool
+
+from tools.registry import build_default_tools
+from tools.sandbox_ops import bind as bind_sandbox, SANDBOX_TOOLS
+from tools.transaction_ops import bind as bind_tx, TRANSACTION_TOOLS
+from tools.context_ops import bind as bind_context, CONTEXT_TOOLS
+from tools.test_ops import bind as bind_test, TEST_TOOLS
+from tools.status_ops import bind as bind_status, STATUS_TOOLS
+from tools.subagent_ops import (
+    bind as bind_subagent,
+    bind_graphs,
+    SUBAGENT_TOOLS,
+)
+from tools.lint import validate_tools
+
+from codebase.parser import CodeParser
 from codebase.dep_graph import DependencyGraph, create_dep_tools
+from codebase.call_graph import CallGraph, create_call_tools
 from codebase.impact import ImpactAnalyzer, create_impact_tool
+from codebase.repo_map import RepoMapBuilder, create_repo_map_tool
 from codebase.indexer import (
     CodeIndexer,
-    create_index_status_tool,
     create_search_tool,
+    create_index_status_tool,
 )
-from codebase.parser import CodeParser
-from codebase.repo_map import RepoMapBuilder, create_repo_map_tool
+from codebase.background_indexer import BackgroundIndexer
+
+from middleware.dependency_check import create_dependency_check_middleware
+from middleware.prompt_cache import create_prompt_cache_middleware
+from middleware.context_compaction import (
+    ContextCompactionMiddleware,
+    CompactionPipelineConfig,
+)
+from middleware.thinking_router import create_thinking_router_middleware
+from middleware.content_stripper import create_content_stripper_middleware
+from middleware.tool_filter import create_tool_filter_middleware
+from middleware.tool_search import create_tool_search_tool
+from middleware.status_bar import StatusBarMiddleware
+from middleware.circuit_breaker import CircuitBreakerMiddleware, CircuitBreakerConfig
+from middleware.trajectory import TrajectoryMiddleware
+from middleware.metrics import MetricsMiddleware
+
 from context.assembly import ContextAssembler
 from context.status_bar import AgentStatusBar
 
-# ★ 优先级 3：工程经验
-from memory.lesson_extractor import load_lessons
+from observability.trajectory_writer import TrajectoryWriter
+
+from skills.registry import SkillRegistry
+from skills.loader import create_load_skill_tool
 
 # ★ 优先级 2：用户偏好
 from memory.user_preference import load_user_memory
-from middleware.circuit_breaker import CircuitBreakerConfig, CircuitBreakerMiddleware
-from middleware.content_stripper import create_content_stripper_middleware
-from middleware.context_compaction import (
-    CompactionPipelineConfig,
-    ContextCompactionMiddleware,
-)
-from middleware.dependency_check import create_dependency_check_middleware
-from middleware.metrics import MetricsMiddleware
-from middleware.prompt_cache import create_prompt_cache_middleware
-from middleware.status_bar import StatusBarMiddleware
-from middleware.thinking_router import create_thinking_router_middleware
-from middleware.tool_filter import create_tool_filter_middleware
-from middleware.tool_search import create_tool_search_tool
-from middleware.trajectory import TrajectoryMiddleware
-from observability.trajectory_writer import TrajectoryWriter
-from sandbox.docker_backend import DockerSandbox
-from sandbox.patch import create_apply_patch_tool
-from sandbox.pool import SandboxPool
-from skills.loader import create_load_skill_tool
-from skills.registry import SkillRegistry
-from tools.context_ops import CONTEXT_TOOLS
-from tools.context_ops import bind as bind_context
-from tools.lint import validate_tools
-from tools.registry import build_default_tools
-from tools.sandbox_ops import SANDBOX_TOOLS
-from tools.sandbox_ops import bind as bind_sandbox
-from tools.status_ops import STATUS_TOOLS
-from tools.status_ops import bind as bind_status
-from tools.subagent_ops import (
-    SUBAGENT_TOOLS,
-    bind_graphs,
-)
-from tools.subagent_ops import (
-    bind as bind_subagent,
-)
-from tools.test_ops import TEST_TOOLS
-from tools.test_ops import bind as bind_test
-from tools.transaction_ops import TRANSACTION_TOOLS
-from tools.transaction_ops import bind as bind_tx
+# ★ 优先级 3：工程经验
+from memory.lesson_extractor import load_lessons
 
 try:
     from mcp_client.client import MCPConfig, load_mcp_tools_sync
-
     _MCP_AVAILABLE = True
 except ImportError as _e:
     import sys
-
     print(f"[core] MCP 导入失败: {_e}", file=sys.stderr)
     MCPConfig = None  # type: ignore
     load_mcp_tools_sync = None  # type: ignore
@@ -107,7 +103,6 @@ def _get_sandbox_pool() -> SandboxPool:
 # ============================================================
 # 资源加载
 # ============================================================
-
 
 def load_system_prompt(agent_home: Path) -> str:
     path = agent_home / "prompts" / "system_v1.md"
@@ -136,20 +131,18 @@ def build_mcp_config(agent_home: Path):
     if not _MCP_AVAILABLE:
         raise RuntimeError("MCP 不可用（mcp_client.client 导入失败）")
 
-    return MCPConfig(
-        servers={
-            "git": {
-                "command": "python",
-                "args": [str(agent_home / "mcp_client" / "servers" / "git_server.py")],
-                "transport": "stdio",
-            },
-            "web": {
-                "command": "python",
-                "args": [str(agent_home / "mcp_client" / "servers" / "web_search_server.py")],
-                "transport": "stdio",
-            },
-        }
-    )
+    return MCPConfig(servers={
+        "git": {
+            "command": "python",
+            "args": [str(agent_home / "mcp_client" / "servers" / "git_server.py")],
+            "transport": "stdio",
+        },
+        "web": {
+            "command": "python",
+            "args": [str(agent_home / "mcp_client" / "servers" / "web_search_server.py")],
+            "transport": "stdio",
+        },
+    })
 
 
 def _load_mcp_in_thread(config, timeout: float = 15.0) -> list[Any]:
@@ -175,12 +168,14 @@ def _load_mcp_in_thread(config, timeout: float = 15.0) -> list[Any]:
 # LLM 初始化
 # ============================================================
 
-
 def build_llm(cfg: AgentConfig):
     if cfg.model_provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
-        print(f"[core] Anthropic 接口: provider={cfg.provider_id!r} model={cfg.model!r}")
+        print(
+            f"[core] Anthropic 接口: provider={cfg.provider_id!r} "
+            f"model={cfg.model!r}"
+        )
 
         kwargs: dict[str, Any] = {
             "model": cfg.model,
@@ -236,7 +231,6 @@ def _build_compaction_llm(cfg: AgentConfig):
 # 运行时句柄
 # ============================================================
 
-
 @dataclass
 class AgentRuntime:
     agent: Any
@@ -279,8 +273,9 @@ class AgentRuntime:
     def planning_graph(self):
         if self._planning_graph is None:
             from agent.graph import build_planning_graph
-
-            self._planning_graph = build_planning_graph(self.agent, self.checkpointer)
+            self._planning_graph = build_planning_graph(
+                self.agent, self.checkpointer
+            )
         return self._planning_graph
 
     @property
@@ -291,7 +286,9 @@ class AgentRuntime:
             def _exec(cmd: str):
                 return self.sandbox.exec(cmd)
 
-            self._repair_graph = build_repair_graph(self.agent, _exec, self.checkpointer)
+            self._repair_graph = build_repair_graph(
+                self.agent, _exec, self.checkpointer
+            )
         return self._repair_graph
 
     def close(self) -> None:
@@ -334,7 +331,6 @@ class AgentRuntime:
 # ============================================================
 # 主装配函数
 # ============================================================
-
 
 def build_agent(cfg: AgentConfig) -> AgentRuntime:
     from observability.logger import get_logger
@@ -426,11 +422,9 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     tools += build_default_tools(str(cfg.project_path))
 
     from tools import sandbox_ops as _sb
-
     tools += [_sb.__dict__[n] for n in SANDBOX_TOOLS]
 
     from tools import transaction_ops as _tx
-
     tools += [_tx.__dict__[n] for n in TRANSACTION_TOOLS]
 
     tools.append(create_apply_patch_tool(str(cfg.project_path)))
@@ -445,19 +439,15 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     ]
 
     from tools import context_ops as _ctx
-
     tools += [_ctx.__dict__[n] for n in CONTEXT_TOOLS]
 
     from tools import test_ops as _test
-
     tools += [_test.__dict__[n] for n in TEST_TOOLS]
 
     from tools import status_ops as _st
-
     tools += [_st.__dict__[n] for n in STATUS_TOOLS]
 
     from tools import subagent_ops as _sub
-
     tools += [_sub.__dict__[n] for n in SUBAGENT_TOOLS]
 
     tools.append(create_load_skill_tool(skill_registry))
@@ -500,7 +490,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     # ---------- 11. 轨迹持久化 ----------
     trajectory_writer = TrajectoryWriter(
-        session_id=f"session-{id(cfg) & 0xFFFFFF:x}",
+        session_id=f"session-{id(cfg) & 0xffffff:x}",
         base_dir=str(cfg.trajectory_dir),
     )
     trajectory_mw = TrajectoryMiddleware(trajectory_writer)
@@ -516,7 +506,9 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     from observability.metrics_store import MetricsStore
 
-    metrics_store = MetricsStore(str(Path.home() / ".coding-agent" / "metrics.db"))
+    metrics_store = MetricsStore(
+        str(Path.home() / ".coding-agent" / "metrics.db")
+    )
 
     # ---------- 13. 中间件链 ----------
     all_tool_names = [t.name for t in tools]
@@ -533,11 +525,15 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     middlewares = [
         create_thinking_router_middleware(
             provider=cfg.provider_id,
-            enabled=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
+            enabled=(
+                os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"
+            ),
             strategy=os.getenv("AGENT_THINKING_STRATEGY", "auto"),
         ),
         create_content_stripper_middleware(
-            enabled=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
+            enabled=(
+                os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"
+            ),
         ),
         ContextCompactionMiddleware(
             model=compaction_llm,
@@ -576,9 +572,15 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         tools=len(tools),
         skills=len(skill_registry.all_skills()),
         mcp_tools=len(mcp_tools),
-        thinking_router=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
-        content_stripper=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
-        user_memory=(os.getenv("AGENT_USER_MEMORY", "true").lower() == "true"),
+        thinking_router=(
+            os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"
+        ),
+        content_stripper=(
+            os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"
+        ),
+        user_memory=(
+            os.getenv("AGENT_USER_MEMORY", "true").lower() == "true"
+        ),
         lessons=os.getenv("AGENT_LESSONS", "true").lower() == "true",
         checkpoint_db=str(cfg.meta_dir / "sessions" / "checkpoints.db"),
         elapsed_s=round(time.time() - t0, 2),

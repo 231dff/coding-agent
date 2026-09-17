@@ -1,7 +1,5 @@
 """Agent CLI 入口。"""
-
 from __future__ import annotations
-
 import argparse
 import hashlib
 import os
@@ -9,30 +7,30 @@ import sys
 import time
 from pathlib import Path
 
-from langchain_core.messages import AIMessageChunk, ToolMessage
 from rich.console import Console
-from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
+from rich.live import Live
 from rich.text import Text
+
+from langchain_core.messages import AIMessageChunk, ToolMessage
 
 from agent.config import AgentConfig, resolve_project_path
 from agent.core import build_agent
 from agent.setup_wizard import maybe_run_first_time_setup, run_setup_wizard
+from observability.logger import bind_context, configure_logging, get_logger
+from observability.tracing import configure as configure_tracing, is_enabled, status_text
+from observability.metrics_display import MetricsDisplay
 
+# ★ 优先级 2：用户偏好
+from memory.user_preference import extract_preferences, merge_into_user_memory
 # ★ 优先级 3：工程经验
 from memory.lesson_extractor import (
     extract_lessons_from_trajectories,
     merge_into_lessons,
 )
 
-# ★ 优先级 2：用户偏好
-from memory.user_preference import extract_preferences, merge_into_user_memory
-from observability.logger import bind_context, configure_logging, get_logger
-from observability.metrics_display import MetricsDisplay
-from observability.tracing import configure as configure_tracing
-from observability.tracing import is_enabled, status_text
 
 console = Console()
 log = get_logger("main")
@@ -50,7 +48,6 @@ BANNER = """[bold cyan]
 # 默认 thread_id
 # ============================================================
 
-
 def _default_thread_id(project_path: Path) -> str:
     key = str(project_path.resolve())
     return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
@@ -60,13 +57,15 @@ def _default_thread_id(project_path: Path) -> str:
 # 欢迎 / 帮助 / 配置
 # ============================================================
 
-
 def print_welcome(project_path: Path, rt) -> None:
     console.print(BANNER)
     console.print(f"[bold]项目:[/bold] {project_path}")
 
     cfg = rt.config
-    console.print(f"[bold]模型:[/bold] {cfg.provider_id}/{cfg.model} [dim]({cfg.base_url})[/dim]")
+    console.print(
+        f"[bold]模型:[/bold] {cfg.provider_id}/{cfg.model}"
+        f" [dim]({cfg.base_url})[/dim]"
+    )
 
     if rt.skill_registry:
         stats = rt.skill_registry.stats()
@@ -78,26 +77,26 @@ def print_welcome(project_path: Path, rt) -> None:
     if is_enabled():
         console.print(f"[dim]LangSmith: {status_text()}[/dim]")
 
-    console.print("[dim]输入任务描述，Enter 发送。输入 /help 查看命令。[/dim]\n")
+    console.print(
+        "[dim]输入任务描述，Enter 发送。输入 /help 查看命令。[/dim]\n"
+    )
 
 
 def print_help() -> None:
-    console.print(
-        Panel(
-            "[bold]可用命令[/bold]\n"
-            "  /exit         退出\n"
-            "  /help         显示帮助\n"
-            "  /clear        清空当前会话状态\n"
-            "  /skills       列出所有技能\n"
-            "  /config       显示当前配置\n"
-            "  /metrics      显示本次会话指标\n"
-            "  /trace        查看最近的调用指标\n"
-            "  /learn        从历史轨迹提炼工程经验\n"
-            "  /<skill-name> 加载 user-invoked 技能\n"
-            "  其他输入       作为任务发送给 Agent",
-            title="Help",
-        )
-    )
+    console.print(Panel(
+        "[bold]可用命令[/bold]\n"
+        "  /exit         退出\n"
+        "  /help         显示帮助\n"
+        "  /clear        清空当前会话状态\n"
+        "  /skills       列出所有技能\n"
+        "  /config       显示当前配置\n"
+        "  /metrics      显示本次会话指标\n"
+        "  /trace        查看最近的调用指标\n"
+        "  /learn        从历史轨迹提炼工程经验\n"
+        "  /<skill-name> 加载 user-invoked 技能\n"
+        "  其他输入       作为任务发送给 Agent",
+        title="Help",
+    ))
 
 
 def list_skills(rt) -> None:
@@ -115,18 +114,21 @@ def list_skills(rt) -> None:
                 else "[green]model[/green]"
             )
             prefix = "/" if skill.disable_model_invocation else " "
-            console.print(f"  {tag} {prefix}{skill.name}: {skill.description[:80]}")
+            console.print(
+                f"  {tag} {prefix}{skill.name}: {skill.description[:80]}"
+            )
     console.print()
 
 
 def show_config(rt) -> None:
     cfg = rt.config
     from agent.config import global_config_file, project_config_file
-
     lines = [f"  [bold]{k}:[/bold] {v}" for k, v in cfg.to_dict().items()]
     lines.append("")
     lines.append(f"  [dim]全局配置: {global_config_file()}[/dim]")
-    lines.append(f"  [dim]项目配置: {project_config_file(cfg.project_path)}[/dim]")
+    lines.append(
+        f"  [dim]项目配置: {project_config_file(cfg.project_path)}[/dim]"
+    )
     if is_enabled():
         lines.append(f"  [dim]LangSmith: {status_text()}[/dim]")
     console.print(Panel("\n".join(lines), title="当前配置"))
@@ -135,17 +137,14 @@ def show_config(rt) -> None:
 def show_metrics(rt) -> None:
     try:
         from api.metrics_timeseries import get_store
-
         store = get_store()
         stats = store.stats()
-        console.print(
-            Panel(
-                f"  [bold]存储文件:[/bold] {stats['db_path']}\n"
-                f"  [bold]总行数:[/bold] {stats['total_rows']}\n"
-                f"  [bold]文件大小:[/bold] {stats['db_size_bytes'] / 1024:.1f} KB",
-                title="指标存储",
-            )
-        )
+        console.print(Panel(
+            f"  [bold]存储文件:[/bold] {stats['db_path']}\n"
+            f"  [bold]总行数:[/bold] {stats['total_rows']}\n"
+            f"  [bold]文件大小:[/bold] {stats['db_size_bytes'] / 1024:.1f} KB",
+            title="指标存储",
+        ))
     except Exception as e:
         console.print(f"[red]获取指标失败: {e}[/red]")
 
@@ -173,7 +172,6 @@ def parse_agent_args() -> argparse.Namespace:
 # ============================================================
 # 流式渲染辅助
 # ============================================================
-
 
 def _extract_reasoning(chunk) -> str:
     ak = getattr(chunk, "additional_kwargs", None) or {}
@@ -228,7 +226,7 @@ def _dedup_repeats(text: str) -> str:
     for seg_len in (500, 300, 200, 150):
         if seg_len * 2 > n:
             continue
-        seg = text[n // 2 : n // 2 + seg_len]
+        seg = text[n // 2: n // 2 + seg_len]
         if not seg.strip():
             continue
         idx = text.find(seg, n // 2 + seg_len)
@@ -240,7 +238,6 @@ def _dedup_repeats(text: str) -> str:
 # ============================================================
 # 流式任务执行
 # ============================================================
-
 
 def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
     reasoning_buf: list[str] = []
@@ -343,7 +340,6 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
 # ★ 优先级 2：会话结束提炼用户偏好
 # ============================================================
 
-
 def extract_and_save_preferences(rt, thread_id: str) -> None:
     """会话结束时提炼用户偏好，追加到 user.md。"""
     if os.getenv("AGENT_USER_MEMORY", "true").lower() != "true":
@@ -360,7 +356,6 @@ def extract_and_save_preferences(rt, thread_id: str) -> None:
             return
 
         from agent.core import _build_compaction_llm
-
         llm = _build_compaction_llm(rt.config)
 
         console.print("[dim]正在提炼用户偏好…[/dim]")
@@ -371,7 +366,10 @@ def extract_and_save_preferences(rt, thread_id: str) -> None:
             return
 
         merge_into_user_memory(rt.config.meta_dir, extracted)
-        console.print(f"[dim]用户偏好已更新: {rt.config.meta_dir / 'memory' / 'user.md'}[/dim]")
+        console.print(
+            f"[dim]用户偏好已更新: "
+            f"{rt.config.meta_dir / 'memory' / 'user.md'}[/dim]"
+        )
     except Exception as e:
         log.warning(
             "preference_extraction_failed",
@@ -383,7 +381,6 @@ def extract_and_save_preferences(rt, thread_id: str) -> None:
 # ============================================================
 # ★ 优先级 3：从轨迹提炼工程经验
 # ============================================================
-
 
 def learn_from_trajectories(rt) -> None:
     """从最近的轨迹里提炼工程经验。
@@ -398,7 +395,6 @@ def learn_from_trajectories(rt) -> None:
         traj_dir = rt.config.trajectory_dir
 
         from agent.core import _build_compaction_llm
-
         llm = _build_compaction_llm(rt.config)
 
         console.print("[dim]正在分析最近的成功轨迹…[/dim]")
@@ -409,7 +405,10 @@ def learn_from_trajectories(rt) -> None:
             return
 
         merge_into_lessons(rt.config.meta_dir, extracted)
-        console.print(f"[dim]工程经验已更新: {rt.config.meta_dir / 'memory' / 'lessons.md'}[/dim]")
+        console.print(
+            f"[dim]工程经验已更新: "
+            f"{rt.config.meta_dir / 'memory' / 'lessons.md'}[/dim]"
+        )
     except Exception as e:
         log.warning(
             "lesson_extraction_failed",
@@ -422,7 +421,6 @@ def learn_from_trajectories(rt) -> None:
 # ============================================================
 # 单次任务 / 交互模式
 # ============================================================
-
 
 def run_single_task(rt, task: str, thread_id: str, display: MetricsDisplay) -> None:
     console.print(f"[bold green]任务:[/bold green] {task}\n")
@@ -453,7 +451,10 @@ def handle_user_invoked_skill(rt, user_input: str) -> str | None:
     if skill is None:
         return None
     if not skill.disable_model_invocation:
-        console.print(f"[yellow]{skill_name} 是 model-invoked 技能，模型会自动调用[/yellow]")
+        console.print(
+            f"[yellow]{skill_name} 是 model-invoked 技能，"
+            f"模型会自动调用[/yellow]"
+        )
         return None
 
     console.print(f"[dim]加载技能: {skill_name}[/dim]")
@@ -511,7 +512,8 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
             handled = handle_user_invoked_skill(rt, user_input)
             if handled is None:
                 console.print(
-                    f"[red]未知命令或技能: {user_input}[/red]\n[dim]输入 /help 查看命令[/dim]"
+                    f"[red]未知命令或技能: {user_input}[/red]\n"
+                    f"[dim]输入 /help 查看命令[/dim]"
                 )
                 continue
             task_text = handled
@@ -539,7 +541,6 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 # init 子命令
 # ============================================================
 
-
 def cmd_init(args: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="coding-agent init")
     parser.add_argument("--project", "-p", default=None)
@@ -558,7 +559,6 @@ def cmd_init(args: list[str]) -> int:
 # ============================================================
 # 主入口
 # ============================================================
-
 
 def main() -> int:
     json_logs = os.getenv("LOG_JSON", "false").lower() == "true"
