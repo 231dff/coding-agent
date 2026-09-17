@@ -170,7 +170,7 @@ def show_trace(display: MetricsDisplay) -> None:
 
 
 # ============================================================
-# ★ 记忆相关命令
+# 记忆相关命令
 # ============================================================
 
 
@@ -220,10 +220,65 @@ def show_recall(query: str) -> None:
 
     lines = [f"[bold]查询:[/bold] {query}", ""]
     for i, item in enumerate(items, 1):
-        lines.append(f"[bold cyan]{i}. [{item.task_type}] score={item.score}[/bold cyan]")
+        source_tag = f" [{item.source}]" if item.source else ""
+        lines.append(
+            f"[bold cyan]{i}. [{item.task_type}]{source_tag} score={item.score}[/bold cyan]"
+        )
         lines.append(f"   {item.summary}")
         lines.append("")
     console.print(Panel("\n".join(lines), title="历史会话检索（第 2 层）"))
+
+
+def _retriever_display_info(user_id: str) -> str:
+    """返回检索器状态描述。
+
+    关键：不主动初始化检索器（避免触发模型下载）。
+    只在缓存里已有实例时展示详情，否则只显示配置。
+    """
+    kind = os.getenv("AGENT_RETRIEVER", "bm25").lower()
+
+    # BM25 无需展示细节
+    if kind == "bm25":
+        return "BM25（关键词）"
+
+    # 看是否已有缓存的实例（避免触发初始化）
+    try:
+        from memory.retriever import _RETRIEVER_CACHE
+
+        cache_key = f"{kind}:{user_id}"
+        retriever = _RETRIEVER_CACHE.get(cache_key)
+    except Exception:
+        retriever = None
+
+    if retriever is None:
+        # 未初始化：只显示配置
+        model = os.getenv("AGENT_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+        if kind == "chroma":
+            return (
+                f"ChromaDB（未初始化，模型={model}）\n"
+                f"      首次使用时会下载模型，运行一个任务后重试"
+            )
+        if kind == "hybrid":
+            return (
+                f"Hybrid（未初始化，模型={model}）\n      首次使用时会下载模型，运行一个任务后重试"
+            )
+        return f"{kind}（未初始化）"
+
+    # 已有缓存实例：正常展示
+    cls = type(retriever).__name__
+
+    if cls == "HybridRetriever":
+        if retriever.is_hybrid:
+            return f"Hybrid（向量 {retriever.chroma.count()} 条 + BM25）"
+        return f"Hybrid（降级：{retriever._chroma_error[:40]}）"
+
+    if cls == "ChromaRetriever":
+        try:
+            return f"ChromaDB（{retriever.collection.count()} 条向量）"
+        except Exception:
+            return "ChromaDB"
+
+    return f"{kind}（未知类型 {cls}）"
 
 
 def show_memory_status() -> None:
@@ -241,6 +296,9 @@ def show_memory_status() -> None:
     except Exception:
         n_summaries = "?"
 
+    # 检索器信息
+    retriever_info = _retriever_display_info(user_id)
+
     from memory.store import agent_home
 
     console.print(
@@ -252,11 +310,12 @@ def show_memory_status() -> None:
             f"\n"
             f"  [bold]第 1 层（卡片）:[/bold] {n_cards} 条\n"
             f"  [bold]第 2 层（会话摘要）:[/bold] {n_summaries} 条\n"
+            f"  [bold]检索器:[/bold] {retriever_info}\n"
             f"\n"
             f"  [dim]切换后端:[/dim]\n"
             f"  [dim]  AGENT_STORE_BACKEND=sqlite|postgres|memory[/dim]\n"
-            f"  [dim]  AGENT_STORE_DSN=...[/dim]\n"
-            f"  [dim]  POSTGRES_DSN=postgresql://...[/dim]",
+            f"  [dim]  AGENT_RETRIEVER=bm25|chroma|hybrid[/dim]\n"
+            f"  [dim]  AGENT_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5[/dim]",
             title="长期记忆",
         )
     )
@@ -317,8 +376,21 @@ def extract_and_save_memory(rt, thread_id: str) -> None:
                     project_path=project_path,
                 )
                 if summary and summary.summary:
+                    # 写 Store（持久化）
                     session_summary_repo(user_id=user_id).add(summary)
-                    console.print(f"[dim]会话摘要已保存 （{summary.task_type}）[/dim]")
+
+                    # 同步索引到检索器
+                    try:
+                        from memory.retriever import get_retriever
+
+                        get_retriever(user_id=user_id).index(summary)
+                    except Exception as idx_err:
+                        log.warning(
+                            "retriever_index_failed",
+                            error=str(idx_err),
+                        )
+
+                    console.print(f"[dim]会话摘要已保存（{summary.task_type}）[/dim]")
             except Exception as e:
                 log.warning("session_summary_failed", error=str(e))
 
