@@ -1,30 +1,17 @@
 """agent/core.py — Coding Agent 装配入口。
 
-核心设计：
-- agent_home:   Agent 自身代码路径（只读，加载 prompts/queries）
-- project_path: 用户项目路径（Agent 操作对象）
-- meta_dir:     Agent 元数据目录（用户项目内的 .coding-agent/）
-
 集成：
 - 多 Provider 模型支持
 - 沙箱工厂（SandboxPool）
 - 条件化思考（ThinkingRouter）
 - Content 剥离（ContentStripper）
 - 会话持久化（SQLite checkpointer）
-- 双层记忆：
-  * Layer 1: Advanced JSON Cards（全局，常驻 system prompt）
-  * Layer 2: 会话摘要 + 上下文感知检索（按需注入）
-- LangGraph Store 后端（sqlite / postgres / memory 可切换）
+- 双层记忆（Cards + Retrieval）
+- LangGraph Store 后端
 
-兼容性：
-- temperature 为 None 时不发送
-- api_key 为空时用 "dummy"
-- AgentRuntime 转发 invoke / stream / astream_events
-
-缓存友好设计：
-- 中间件顺序：思考路由 → content 剥离 → 检索注入 → 压缩 → 过滤 → 指标 → 工具层 → 状态栏 → 轨迹 → 缓存标记
-- 工具集按字母序排序
-- 状态栏移除时间戳类字段
+性能优化：
+- 沙箱启动与代码库分析并行执行
+- 检索器延迟初始化（不阻塞启动）
 """
 
 from __future__ import annotations
@@ -51,16 +38,10 @@ from codebase.indexer import (
     create_index_status_tool,
     create_search_tool,
 )
-
-# ---------- 代码库分析 ----------
 from codebase.parser import CodeParser
 from codebase.repo_map import RepoMapBuilder, create_repo_map_tool
-
-# ---------- 上下文 ----------
 from context.assembly import ContextAssembler
 from context.status_bar import AgentStatusBar
-
-# ---------- 记忆（双层架构）----------
 from memory.cards import user_card_repo
 from memory.store import (
     get_store as get_memory_store,
@@ -74,8 +55,6 @@ from middleware.context_compaction import (
     CompactionPipelineConfig,
     ContextCompactionMiddleware,
 )
-
-# ---------- 中间件 ----------
 from middleware.dependency_check import create_dependency_check_middleware
 from middleware.metrics import MetricsMiddleware
 from middleware.prompt_cache import create_prompt_cache_middleware
@@ -85,23 +64,15 @@ from middleware.thinking_router import create_thinking_router_middleware
 from middleware.tool_filter import create_tool_filter_middleware
 from middleware.tool_search import create_tool_search_tool
 from middleware.trajectory import TrajectoryMiddleware
-
-# ---------- 可观测性 ----------
 from observability.trajectory_writer import TrajectoryWriter
-
-# ---------- 沙箱 ----------
 from sandbox.docker_backend import DockerSandbox
 from sandbox.patch import create_apply_patch_tool
 from sandbox.pool import SandboxPool
 from skills.loader import create_load_skill_tool
-
-# ---------- 技能 ----------
 from skills.registry import SkillRegistry
 from tools.context_ops import CONTEXT_TOOLS
 from tools.context_ops import bind as bind_context
 from tools.lint import validate_tools
-
-# ---------- 工具 ----------
 from tools.registry import build_default_tools
 from tools.sandbox_ops import SANDBOX_TOOLS
 from tools.sandbox_ops import bind as bind_sandbox
@@ -119,7 +90,6 @@ from tools.test_ops import bind as bind_test
 from tools.transaction_ops import TRANSACTION_TOOLS
 from tools.transaction_ops import bind as bind_tx
 
-# ---------- MCP ----------
 try:
     from mcp_client.client import MCPConfig, load_mcp_tools_sync
 
@@ -134,7 +104,7 @@ except ImportError as _e:
 
 
 # ============================================================
-# 全局沙箱工厂（进程级单例）
+# 全局沙箱工厂
 # ============================================================
 
 _SANDBOX_POOL: SandboxPool | None = None
@@ -142,7 +112,6 @@ _SANDBOX_POOL_LOCK = threading.Lock()
 
 
 def _get_sandbox_pool() -> SandboxPool:
-    """返回进程级沙箱工厂。"""
     global _SANDBOX_POOL
     with _SANDBOX_POOL_LOCK:
         if _SANDBOX_POOL is None:
@@ -286,8 +255,6 @@ def _build_compaction_llm(cfg: AgentConfig):
 
 @dataclass
 class AgentRuntime:
-    """Agent 运行时句柄。"""
-
     agent: Any
     sandbox: DockerSandbox
     assembler: ContextAssembler
@@ -305,8 +272,6 @@ class AgentRuntime:
     _planning_graph: Any = field(default=None, init=False, repr=False)
     _repair_graph: Any = field(default=None, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
-
-    # ---------- 转发到底层 agent ----------
 
     def invoke(self, *args, **kwargs):
         return self.agent.invoke(*args, **kwargs)
@@ -329,8 +294,6 @@ class AgentRuntime:
     def get_state(self, *args, **kwargs):
         return self.agent.get_state(*args, **kwargs)
 
-    # ---------- 懒加载图 ----------
-
     @property
     def planning_graph(self):
         if self._planning_graph is None:
@@ -349,8 +312,6 @@ class AgentRuntime:
 
             self._repair_graph = build_repair_graph(self.agent, _exec, self.checkpointer)
         return self._repair_graph
-
-    # ---------- 生命周期 ----------
 
     def close(self) -> None:
         if self._closed:
@@ -382,8 +343,6 @@ class AgentRuntime:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    # ---------- 状态查询 ----------
-
     def check_prefix_stability(self) -> bool:
         return self.assembler.check_prefix_stability()
 
@@ -392,12 +351,60 @@ class AgentRuntime:
 
 
 # ============================================================
+# 并行辅助
+# ============================================================
+
+
+def _start_sandbox(cfg: AgentConfig, log) -> tuple[DockerSandbox, bool]:
+    """启动沙箱。返回 (sandbox, from_pool)。"""
+    from_pool = False
+    try:
+        sb = _get_sandbox_pool().acquire(str(cfg.project_path))
+        from_pool = True
+        return sb, from_pool
+    except Exception as e:
+        log.warning("sandbox_factory_acquire_failed", error=str(e))
+        sb = DockerSandbox(
+            str(cfg.project_path),
+            memory_limit="2g",
+            cpu_limit=2.0,
+            network=False,
+        )
+        sb.start()
+        return sb, from_pool
+
+
+def _build_codebase(cfg: AgentConfig, log) -> tuple[Any, Any, Any, Any]:
+    """构建代码库分析对象。
+
+    Returns:
+        (parser, dep_graph, call_graph, analyzer)
+    """
+    parser = CodeParser(str(cfg.project_path))
+    dep_graph = DependencyGraph(parser)
+    call_graph = CallGraph(parser)
+
+    try:
+        dep_graph.build()
+        call_graph.build()
+    except Exception as e:
+        log.warning("codebase_build_failed", error=str(e))
+
+    analyzer = ImpactAnalyzer(call_graph, dep_graph)
+    return parser, dep_graph, call_graph, analyzer
+
+
+# ============================================================
 # 主装配函数
 # ============================================================
 
 
 def build_agent(cfg: AgentConfig) -> AgentRuntime:
-    """组装完整的 Coding Agent。"""
+    """组装完整的 Coding Agent。
+
+    性能优化：
+    - 沙箱启动与代码库分析并行（节省 max(A, B) - (A+B)/2 时间）
+    """
     from observability.logger import get_logger
 
     log = get_logger("core")
@@ -412,49 +419,35 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         project=str(cfg.project_path),
     )
 
-    # ---------- 0. LLM + checkpointer ----------
+    # ---------- 0. LLM + checkpointer（快） ----------
     llm = build_llm(cfg)
     compaction_llm = _build_compaction_llm(cfg)
     checkpointer = build_checkpointer(cfg.meta_dir)
 
-    # 初始化 memory store（首次调用会按环境变量选择后端）
+    # Memory store 首次初始化（不加载嵌入模型）
     try:
         _ = get_memory_store()
     except Exception as e:
         log.warning("memory_store_init_failed", error=str(e))
 
-    # ---------- 1. 沙箱 ----------
-    sandbox_from_pool = False
-    try:
-        sandbox = _get_sandbox_pool().acquire(str(cfg.project_path))
-        sandbox_from_pool = True
-    except Exception as e:
-        log.warning("sandbox_factory_acquire_failed", error=str(e))
-        sandbox = DockerSandbox(
-            str(cfg.project_path),
-            memory_limit="2g",
-            cpu_limit=2.0,
-            network=False,
-        )
-        sandbox.start()
+    # ---------- 1. 沙箱 + 代码库分析（并行） ----------
+    t_parallel = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        sandbox_future = ex.submit(_start_sandbox, cfg, log)
+        codebase_future = ex.submit(_build_codebase, cfg, log)
 
-    # ---------- 2. 代码库静态分析 ----------
-    parser = CodeParser(str(cfg.project_path))
-    dep_graph = DependencyGraph(parser)
-    call_graph = CallGraph(parser)
+        sandbox, sandbox_from_pool = sandbox_future.result()
+        parser, dep_graph, call_graph, analyzer = codebase_future.result()
 
-    try:
-        dep_graph.build()
-        call_graph.build()
-    except Exception as e:
-        log.warning("codebase_build_failed", error=str(e))
+    log.info(
+        "parallel_init_done",
+        elapsed_s=round(time.time() - t_parallel, 2),
+    )
 
-    analyzer = ImpactAnalyzer(call_graph, dep_graph)
-
-    # ---------- 3. 状态栏 ----------
+    # ---------- 2. 状态栏 ----------
     status_bar = AgentStatusBar(mode="persistent")
 
-    # ---------- 4. 全局绑定 ----------
+    # ---------- 3. 全局绑定 ----------
     bind_sandbox(sandbox)
     bind_tx(sandbox, str(cfg.project_path))
     bind_context(str(cfg.project_path))
@@ -463,16 +456,16 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     bind_subagent(str(cfg.project_path), cfg.model)
     bind_graphs(call_graph)
 
-    # ---------- 5. 后台索引 ----------
+    # ---------- 4. 后台索引 ----------
     indexer = CodeIndexer(parser, persist_dir=str(cfg.index_dir))
     bg_indexer = BackgroundIndexer(parser, indexer)
     bg_indexer.start(background=True)
 
-    # ---------- 6. 技能 ----------
+    # ---------- 5. 技能 ----------
     skill_registry = SkillRegistry()
     status_bar.set_skills([s.name for s in skill_registry.all_skills()])
 
-    # ---------- 7. MCP ----------
+    # ---------- 6. MCP ----------
     mcp_tools: list[Any] = []
     if cfg.enable_mcp and _MCP_AVAILABLE:
         try:
@@ -487,7 +480,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         else:
             print("[core] MCP 已跳过（AGENT_ENABLE_MCP=false）")
 
-    # ---------- 8. 工具集 ----------
+    # ---------- 7. 工具集 ----------
     tools: list[Any] = []
 
     tools += build_default_tools(str(cfg.project_path))
@@ -535,14 +528,14 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     validate_tools(tools, strict=cfg.strict_lint)
 
-    # ---------- 9. 系统提示 ----------
+    # ---------- 8. 系统提示 ----------
     system_prompt = load_system_prompt(cfg.agent_home)
 
     project_memory = load_project_memory(cfg.project_path)
     if project_memory:
         system_prompt = f"{system_prompt}\n\n## Project Memory\n{project_memory}"
 
-    # ★ 第 1 层记忆：用户卡片（全局，全量注入，按 confidence 排序截断）
+    # 第 1 层记忆：用户卡片（全量注入）
     if os.getenv("AGENT_USER_MEMORY", "true").lower() == "true":
         try:
             cards_text = user_card_repo().render_prompt(max_cards=40)
@@ -555,21 +548,21 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     if skill_meta:
         system_prompt = f"{system_prompt}\n\n{skill_meta}"
 
-    # ---------- 10. 上下文装配 ----------
+    # ---------- 9. 上下文装配 ----------
     assembler = ContextAssembler(
         system_prompt=system_prompt,
         tool_definitions=render_tool_definitions(tools),
         project_memory="",
     )
 
-    # ---------- 11. 轨迹持久化 ----------
+    # ---------- 10. 轨迹持久化 ----------
     trajectory_writer = TrajectoryWriter(
         session_id=f"session-{id(cfg) & 0xFFFFFF:x}",
         base_dir=str(cfg.trajectory_dir),
     )
     trajectory_mw = TrajectoryMiddleware(trajectory_writer)
 
-    # ---------- 12. 指标队列 ----------
+    # ---------- 11. 指标队列 ----------
     metrics_queue: "queue.Queue[dict]" = queue.Queue(maxsize=2000)
 
     def _on_metric(event: dict) -> None:
@@ -582,7 +575,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     metrics_store = MetricsStore(str(Path.home() / ".coding-agent" / "metrics.db"))
 
-    # ---------- 13. 中间件链 ----------
+    # ---------- 12. 中间件链 ----------
     all_tool_names = [t.name for t in tools]
     skill_tool_map = {s.name: s.tools for s in skill_registry.all_skills()}
 
@@ -595,42 +588,34 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     )
 
     middlewares = [
-        # 1. 条件化思考（最先跑，读原始 user 消息）
         create_thinking_router_middleware(
             provider=cfg.provider_id,
             enabled=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
             strategy=os.getenv("AGENT_THINKING_STRATEGY", "auto"),
         ),
-        # 2. Content 剥离（清除带 tool_calls 的历史 AI content）
         create_content_stripper_middleware(
             enabled=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
         ),
-        # 3. 第 2 层记忆：检索注入（按当前任务找相关历史会话）
         create_retrieval_inject_middleware(
             enabled=(os.getenv("AGENT_RETRIEVAL", "true").lower() == "true"),
             top_k=int(os.getenv("AGENT_RETRIEVAL_TOP_K", "3")),
         ),
-        # 4. 会重写请求的中间件
         ContextCompactionMiddleware(
             model=compaction_llm,
             workspace=str(cfg.project_path),
             config=CompactionPipelineConfig(model_window=cfg.model_window),
         ),
         create_tool_filter_middleware(all_tool_names, skill_tool_map),
-        # 5. 指标采集
         MetricsMiddleware(
             store=metrics_store,
             model_name=cfg.model,
             debug=False,
             on_metric=_on_metric,
         ),
-        # 6. 工具层中间件
         create_dependency_check_middleware(analyzer),
         circuit_breaker,
-        # 7. 只追加/只读的中间件
         StatusBarMiddleware(status_bar),
         trajectory_mw,
-        # 8. 缓存标记（最后跑）
         create_prompt_cache_middleware(
             cache_ttl="5m",
             default_cache_key="coding-agent-v1",
@@ -638,7 +623,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         ),
     ]
 
-    # ---------- 14. 组装 Agent ----------
+    # ---------- 13. 组装 Agent ----------
     agent = create_agent(
         model=llm,
         tools=tools,
@@ -647,7 +632,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         checkpointer=checkpointer,
     )
 
-    # ---------- 15. 日志 ----------
+    # ---------- 14. 日志 ----------
     backend_info = store_backend_info()
 
     log.info(
@@ -665,7 +650,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         elapsed_s=round(time.time() - t0, 2),
     )
 
-    # ---------- 16. 返回运行时 ----------
+    # ---------- 15. 返回运行时 ----------
     return AgentRuntime(
         agent=agent,
         sandbox=sandbox,

@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -29,6 +30,12 @@ from memory.card_extractor import extract_and_save
 
 # ---------- 双层记忆 ----------
 from memory.cards import user_card_repo
+from memory.pending import (
+    PendingTask,
+    add_pending,
+    load_pending,
+    remove_pending,
+)
 from memory.session_summary import (
     session_summary_repo,
     summarize_session,
@@ -55,7 +62,7 @@ BANNER = """[bold cyan]
 
 
 # ============================================================
-# 默认 thread_id：按项目路径生成稳定 ID（跨重启恢复）
+# 默认 thread_id
 # ============================================================
 
 
@@ -83,7 +90,6 @@ def print_welcome(project_path: Path, rt) -> None:
             f"{stats['user_invoked']} 个用户触发[/dim]"
         )
 
-    # 记忆后端
     info = store_backend_info()
     console.print(f"[dim]记忆: {info.get('backend', '?')} ({info.get('type', '?')})[/dim]")
 
@@ -175,7 +181,6 @@ def show_trace(display: MetricsDisplay) -> None:
 
 
 def show_cards() -> None:
-    """展示当前用户的卡片（第 1 层）。"""
     try:
         repo = user_card_repo()
         cards = repo.load_active()
@@ -202,7 +207,6 @@ def show_cards() -> None:
 
 
 def show_recall(query: str) -> None:
-    """检索历史会话（第 2 层）。"""
     try:
         from memory.retriever import get_retriever
 
@@ -230,18 +234,12 @@ def show_recall(query: str) -> None:
 
 
 def _retriever_display_info(user_id: str) -> str:
-    """返回检索器状态描述。
-
-    关键：不主动初始化检索器（避免触发模型下载）。
-    只在缓存里已有实例时展示详情，否则只显示配置。
-    """
+    """返回检索器状态描述（不触发模型下载）。"""
     kind = os.getenv("AGENT_RETRIEVER", "bm25").lower()
 
-    # BM25 无需展示细节
     if kind == "bm25":
         return "BM25（关键词）"
 
-    # 看是否已有缓存的实例（避免触发初始化）
     try:
         from memory.retriever import _RETRIEVER_CACHE
 
@@ -251,7 +249,6 @@ def _retriever_display_info(user_id: str) -> str:
         retriever = None
 
     if retriever is None:
-        # 未初始化：只显示配置
         model = os.getenv("AGENT_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
         if kind == "chroma":
             return (
@@ -264,17 +261,21 @@ def _retriever_display_info(user_id: str) -> str:
             )
         return f"{kind}（未初始化）"
 
-    # 已有缓存实例：正常展示
     cls = type(retriever).__name__
 
     if cls == "HybridRetriever":
-        if retriever.is_hybrid:
-            return f"Hybrid（向量 {retriever.chroma.count()} 条 + BM25）"
-        return f"Hybrid（降级：{retriever._chroma_error[:40]}）"
+        try:
+            if retriever.is_hybrid:
+                n = retriever.chroma.count() if retriever.chroma else 0
+                return f"Hybrid（向量 {n} 条 + BM25）"
+        except Exception:
+            pass
+        err = getattr(retriever.chroma, "_init_error", "未知") if retriever.chroma else "未启用"
+        return f"Hybrid（降级：{str(err)[:40]}）"
 
     if cls == "ChromaRetriever":
         try:
-            return f"ChromaDB（{retriever.collection.count()} 条向量）"
+            return f"ChromaDB（{retriever.count()} 条向量）"
         except Exception:
             return "ChromaDB"
 
@@ -282,7 +283,6 @@ def _retriever_display_info(user_id: str) -> str:
 
 
 def show_memory_status() -> None:
-    """显示记忆后端状态。"""
     info = store_backend_info()
     user_id = current_user_id()
 
@@ -296,7 +296,6 @@ def show_memory_status() -> None:
     except Exception:
         n_summaries = "?"
 
-    # 检索器信息
     retriever_info = _retriever_display_info(user_id)
 
     from memory.store import agent_home
@@ -326,19 +325,21 @@ def show_memory_status() -> None:
 # ============================================================
 
 
-def extract_and_save_memory(rt, thread_id: str) -> None:
-    """会话结束时：
-    1. 提炼用户卡片（第 1 层）
-    2. 生成会话摘要（第 2 层的原始数据）
+def _do_extraction(rt, thread_id: str) -> None:
+    """同步执行提炼（被异步线程 / 启动补提炼调用）。
+
+    不做任何 terminal 输出，静默执行。
     """
     try:
         config = {"configurable": {"thread_id": thread_id}}
         state = rt.agent.get_state(config)
         if state is None or not state.values:
+            remove_pending(rt.config.meta_dir, thread_id)
             return
 
         messages = state.values.get("messages", [])
         if not messages or len(messages) < 4:
+            remove_pending(rt.config.meta_dir, thread_id)
             return
 
         from agent.core import _build_compaction_llm
@@ -348,26 +349,16 @@ def extract_and_save_memory(rt, thread_id: str) -> None:
         user_id = current_user_id()
         project_path = str(rt.config.project_path)
 
-        # ---------- 1. 提炼卡片 ----------
+        # 1. 提炼卡片
         if os.getenv("AGENT_USER_MEMORY", "true").lower() == "true":
             try:
-                console.print("[dim]正在提炼用户卡片…[/dim]")
-                added, skipped = extract_and_save(
-                    llm,
-                    messages,
-                    session_id=thread_id,
-                )
-                if added:
-                    console.print(f"[dim]新增 {added} 条卡片（跳过 {skipped} 条重复）[/dim]")
-                else:
-                    console.print("[dim]本次会话无新增卡片[/dim]")
+                extract_and_save(llm, messages, session_id=thread_id)
             except Exception as e:
                 log.warning("card_extraction_failed", error=str(e))
 
-        # ---------- 2. 生成会话摘要 ----------
+        # 2. 生成会话摘要
         if os.getenv("AGENT_RETRIEVAL", "true").lower() == "true":
             try:
-                console.print("[dim]正在生成会话摘要…[/dim]")
                 summary = summarize_session(
                     llm,
                     messages,
@@ -376,10 +367,8 @@ def extract_and_save_memory(rt, thread_id: str) -> None:
                     project_path=project_path,
                 )
                 if summary and summary.summary:
-                    # 写 Store（持久化）
                     session_summary_repo(user_id=user_id).add(summary)
 
-                    # 同步索引到检索器
                     try:
                         from memory.retriever import get_retriever
 
@@ -389,22 +378,94 @@ def extract_and_save_memory(rt, thread_id: str) -> None:
                             "retriever_index_failed",
                             error=str(idx_err),
                         )
-
-                    console.print(f"[dim]会话摘要已保存（{summary.task_type}）[/dim]")
             except Exception as e:
                 log.warning("session_summary_failed", error=str(e))
 
+        # 完成 → 清 pending
+        remove_pending(rt.config.meta_dir, thread_id)
+
     except Exception as e:
-        log.warning("memory_extraction_failed", error=str(e))
+        log.warning("extraction_failed", error=str(e))
+
+
+def extract_and_save_memory_async(rt, thread_id: str) -> None:
+    """会话结束时异步提炼。
+
+    流程：
+    1. 写 pending 标记（保险）
+    2. 启动 daemon 线程跑提炼
+    3. 最多等 1 秒
+    """
+    meta_dir = rt.config.meta_dir
+
+    # 写 pending（如果线程被强杀，下次启动会补）
+    try:
+        add_pending(
+            meta_dir,
+            PendingTask(
+                thread_id=thread_id,
+                project_path=str(rt.config.project_path),
+                user_id=current_user_id(),
+            ),
+        )
+    except Exception as e:
+        log.warning("add_pending_failed", error=str(e))
+
+    # 异步线程
+    def _run():
+        try:
+            _do_extraction(rt, thread_id)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_run, daemon=True, name="memory-extract")
+    t.start()
+
+    # 最多等 1 秒
+    t.join(timeout=1.0)
+
+
+def process_pending_on_startup(rt, current_thread_id: str) -> None:
+    """启动时检查 pending 任务，补跑。
+
+    跳过当前 thread（因为还没结束）。
+    """
+    try:
+        meta_dir = rt.config.meta_dir
+        tasks = load_pending(meta_dir)
+        if not tasks:
+            return
+
+        # 过滤掉当前 thread
+        to_process = [t for t in tasks if t.thread_id != current_thread_id]
+        if not to_process:
+            return
+
+        console.print(f"[dim]发现 {len(to_process)} 个待提炼会话，后台补跑…[/dim]")
+
+        def _run():
+            for task in to_process:
+                try:
+                    _do_extraction(rt, task.thread_id)
+                except Exception as e:
+                    log.warning(
+                        "pending_extraction_failed",
+                        thread_id=task.thread_id,
+                        error=str(e),
+                    )
+
+        t = threading.Thread(target=_run, daemon=True, name="pending-extract")
+        t.start()
+    except Exception as e:
+        log.warning("process_pending_failed", error=str(e))
 
 
 # ============================================================
-# /learn 命令：从轨迹提炼工程经验（旧版功能保留）
+# /learn 命令
 # ============================================================
 
 
 def learn_from_trajectories(rt) -> None:
-    """从最近的轨迹里提炼工程经验（可选，独立于卡片系统）。"""
     try:
         from memory.lesson_extractor import (
             extract_lessons_from_trajectories,
@@ -525,14 +586,6 @@ def _dedup_repeats(text: str) -> str:
 
 
 def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
-    """流式调用 Agent，实时展示 reasoning 和 content。
-
-    关键设计：
-    - 只用 stream_mode="messages"
-    - 工具事件从 ToolMessage 取，按名字去重
-    - pending_content 暂存当前轮，收到 ToolMessage 时按标记决定归属
-    - 有 tool_calls 的轮次 content 不进最终结果
-    """
     reasoning_buf: list[str] = []
     content_buf: list[str] = []
     pending_content: list[str] = []
@@ -689,7 +742,6 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 
         lower_input = user_input.lower()
 
-        # ---------- 内置命令 ----------
         if lower_input in ("/exit", "/quit", "exit", "quit"):
             console.print("[dim]再见[/dim]")
             break
@@ -713,7 +765,6 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
             show_trace(display)
             continue
 
-        # ---------- 记忆相关 ----------
         if lower_input == "/cards":
             show_cards()
             continue
@@ -731,7 +782,6 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                 console.print("[red]用法: /recall <查询词>[/red]")
             continue
 
-        # ---------- 用户主动触发的 skill ----------
         task_text = user_input
         if user_input.startswith("/"):
             handled = handle_user_invoked_skill(rt, user_input)
@@ -836,6 +886,12 @@ def main() -> int:
         console.print(f"[red]Agent 启动失败: {type(e).__name__}: {e}[/red]")
         return 1
 
+    # ★ 启动时补跑上次未完成的提炼（后台线程，不阻塞）
+    try:
+        process_pending_on_startup(rt, thread_id)
+    except Exception:
+        pass
+
     display = MetricsDisplay(rt.metrics_queue, console)
     display.start()
 
@@ -846,9 +902,9 @@ def main() -> int:
             print_welcome(project_path, rt)
             run_interactive(rt, thread_id, display)
     finally:
-        # 会话结束钩子：提炼卡片 + 生成摘要
+        # ★ 异步提炼：不阻塞退出
         try:
-            extract_and_save_memory(rt, thread_id)
+            extract_and_save_memory_async(rt, thread_id)
         except Exception:
             pass
 

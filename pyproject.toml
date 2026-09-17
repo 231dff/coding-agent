@@ -28,7 +28,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "python-dotenv>=1.0",
-
+    
     # ============================================================
     # 模型 Provider
     # ============================================================
@@ -118,6 +118,9 @@ dev = [
     # 类型存根
     "types-requests>=2.32",
     "types-pyyaml>=6.0",
+
+    "chromadb>=0.5",
+    "sentence-transformers>=3.0",
 ]
 
 # 云端沙箱（可选）
