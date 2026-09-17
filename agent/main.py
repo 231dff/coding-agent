@@ -1,13 +1,9 @@
-"""Agent CLI 入口。
-
-用法：
-    coding-agent init [--project PATH]
-    coding-agent [--project PATH] [--model MODEL] [task]
-"""
+"""Agent CLI 入口。"""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 import time
@@ -24,6 +20,9 @@ from rich.text import Text
 from agent.config import AgentConfig, resolve_project_path
 from agent.core import build_agent
 from agent.setup_wizard import maybe_run_first_time_setup, run_setup_wizard
+
+# ★ 优先级 2：用户偏好提炼
+from memory.user_preference import extract_preferences, merge_into_user_memory
 from observability.logger import bind_context, configure_logging, get_logger
 from observability.metrics_display import MetricsDisplay
 from observability.tracing import configure as configure_tracing
@@ -39,6 +38,16 @@ BANNER = """[bold cyan]
   ║  对任意项目进行代码理解、修改与测试           ║
   ╚══════════════════════════════════════════════╝
 [/bold cyan]"""
+
+
+# ============================================================
+# 默认 thread_id：按项目路径生成稳定 ID
+# ============================================================
+
+
+def _default_thread_id(project_path: Path) -> str:
+    key = str(project_path.resolve())
+    return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 
 # ============================================================
@@ -145,7 +154,11 @@ def parse_agent_args() -> argparse.Namespace:
     )
     parser.add_argument("--project", "-p", default=None)
     parser.add_argument("--model", default=None)
-    parser.add_argument("--thread-id", default="default")
+    parser.add_argument(
+        "--thread-id",
+        default=None,
+        help="会话 ID（默认按项目路径自动生成，可跨重启恢复）",
+    )
     parser.add_argument("task", nargs="?", default=None)
     return parser.parse_args()
 
@@ -156,7 +169,6 @@ def parse_agent_args() -> argparse.Namespace:
 
 
 def _extract_reasoning(chunk) -> str:
-    """从 AIMessageChunk 里提取 reasoning_content。"""
     ak = getattr(chunk, "additional_kwargs", None) or {}
     if isinstance(ak, dict):
         v = ak.get("reasoning_content")
@@ -177,7 +189,6 @@ def _extract_reasoning(chunk) -> str:
 
 
 def _extract_content(chunk) -> str:
-    """从 AIMessageChunk 里提取正常内容。"""
     content = getattr(chunk, "content", "")
     if isinstance(content, str):
         return content
@@ -193,11 +204,6 @@ def _extract_content(chunk) -> str:
 
 
 def _has_tool_call_signal(msg) -> bool:
-    """判断当前 chunk 是否携带"有工具调用"的信号。
-
-    流式早期只有 tool_call_chunks 有内容，tool_calls 是空的。
-    所以两个都要检查。
-    """
     tcc = getattr(msg, "tool_call_chunks", None)
     if tcc:
         return True
@@ -208,7 +214,6 @@ def _has_tool_call_signal(msg) -> bool:
 
 
 def _dedup_repeats(text: str) -> str:
-    """去掉文本尾部整段重复（模型复读兜底）。"""
     if len(text) < 400:
         return text
 
@@ -231,23 +236,10 @@ def _dedup_repeats(text: str) -> str:
 
 
 def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
-    """流式调用 Agent，实时展示 reasoning 和 content。
-
-    关键设计（解决"每轮 tool_call 前的预告被累积"的问题）：
-
-    - 每轮 LLM 的 content 先进 pending_content
-    - 检测到 tool_call_chunks / tool_calls 就标记本轮有工具调用
-    - 收到 ToolMessage 时代表本轮结束：
-        * 有工具调用 → 丢弃 pending（那是"我先看一下 X"这种预告）
-        * 无工具调用 → 并入 content_buf（这是真正的答案）
-    - 流结束时再 flush 一次
-    - 只用 stream_mode="messages"，避免 updates 累积
-    - 工具事件从 ToolMessage 取，按名字去重
-    """
     reasoning_buf: list[str] = []
-    content_buf: list[str] = []  # 最终答案（已确认非预告）
-    pending_content: list[str] = []  # 当前轮暂存
-    round_has_tool_call = [False]  # 当前轮是否出现工具调用信号
+    content_buf: list[str] = []
+    pending_content: list[str] = []
+    round_has_tool_call = [False]
     tool_seen: set[str] = set()
     tool_events: list[str] = []
 
@@ -256,14 +248,12 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
     _last_update = [0.0]
 
     def flush_round():
-        """当前轮结束：按标记决定 pending 的归属。"""
         if not round_has_tool_call[0] and pending_content:
             content_buf.extend(pending_content)
         pending_content.clear()
         round_has_tool_call[0] = False
 
     def current_display_text() -> str:
-        """显示用文本：已确认的 content_buf + 当前 pending（若本轮无工具信号）。"""
         parts = []
         if content_buf:
             parts.append("".join(content_buf))
@@ -311,7 +301,6 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
                 continue
 
             if isinstance(msg, AIMessageChunk):
-                # 只要出现工具调用信号，就标记本轮有工具
                 if _has_tool_call_signal(msg):
                     round_has_tool_call[0] = True
 
@@ -324,7 +313,6 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
                     reasoning_buf.append(r)
 
             elif isinstance(msg, ToolMessage):
-                # 本轮结束
                 flush_round()
 
                 name = getattr(msg, "name", "tool") or "tool"
@@ -337,12 +325,60 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
                 live.update(build_display())
                 _last_update[0] = now
 
-        # 流结束：最后一次冲刷
         flush_round()
         live.update(build_display())
 
     raw = "".join(content_buf)
     return _dedup_repeats(raw)
+
+
+# ============================================================
+# ★ 优先级 2：会话结束提炼用户偏好
+# ============================================================
+
+
+def extract_and_save_preferences(rt, thread_id: str) -> None:
+    """会话结束时提炼用户偏好，追加到 user.md。
+
+    设计：
+    - 用轻量模型（AGENT_COMPACTION_MODEL），失败静默
+    - 从 checkpointer 里拉当前会话的消息
+    - 提炼结果合并到 user.md，行级去重
+    """
+    if os.getenv("AGENT_USER_MEMORY", "true").lower() != "true":
+        return
+
+    try:
+        # 从 checkpointer 拿当前 thread 的历史
+        config = {"configurable": {"thread_id": thread_id}}
+        state = rt.agent.get_state(config)
+        if state is None or not state.values:
+            return
+
+        messages = state.values.get("messages", [])
+        if not messages or len(messages) < 4:
+            return
+
+        # 用轻量模型提炼
+        from agent.core import _build_compaction_llm
+
+        llm = _build_compaction_llm(rt.config)
+
+        console.print("[dim]正在提炼用户偏好…[/dim]")
+        extracted = extract_preferences(llm, messages)
+
+        if not extracted:
+            console.print("[dim]本次会话无新增偏好[/dim]")
+            return
+
+        merge_into_user_memory(rt.config.meta_dir, extracted)
+        console.print(f"[dim]用户偏好已更新: {rt.config.meta_dir / 'memory' / 'user.md'}[/dim]")
+    except Exception as e:
+        log.warning(
+            "preference_extraction_failed",
+            error_type=type(e).__name__,
+            error=str(e),
+        )
 
 
 # ============================================================
@@ -520,7 +556,10 @@ def main() -> int:
 
     cfg.ensure_gitignore()
 
+    thread_id = parsed.thread_id or _default_thread_id(project_path)
+
     console.print(f"[dim]正在启动 Agent (project={project_path})...[/dim]")
+    console.print(f"[dim]会话 ID: {thread_id}[/dim]")
 
     try:
         rt = build_agent(cfg)
@@ -534,11 +573,17 @@ def main() -> int:
 
     try:
         if parsed.task:
-            run_single_task(rt, parsed.task, parsed.thread_id, display)
+            run_single_task(rt, parsed.task, thread_id, display)
         else:
             print_welcome(project_path, rt)
-            run_interactive(rt, parsed.thread_id, display)
+            run_interactive(rt, thread_id, display)
     finally:
+        # ★ 优先级 2：会话结束提炼用户偏好（失败不阻塞退出）
+        try:
+            extract_and_save_preferences(rt, thread_id)
+        except Exception:
+            pass
+
         display.stop()
         rt.close()
 
