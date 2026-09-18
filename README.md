@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff&logoColor=white)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-130%20passed-success)](tests/)
+[![Tests](https://img.shields.io/badge/tests-219%20collected-success)](tests/)
 [![Tools](https://img.shields.io/badge/tools-37-blue)](tools/)
 [![Skills](https://img.shields.io/badge/skills-55-blueviolet)](skills/)
 
@@ -77,7 +77,7 @@ $ coding-agent "给 calc.py 的 add 函数补 docstring 并加单元测试"
 
 ### 🛠️ 工具与技能
 
-- **37 个工具**：文件、沙箱、事务、代码库、测试、状态、子 Agent
+- **37 个内置工具**：文件、沙箱、事务、代码库、测试、状态、子 Agent（另有 MCP 动态工具）
 - **55 个技能**（33 模型可见 + 22 内部子文档）：TDD / 代码评审 / 领域建模 / 排查 bug…
 - **MCP 协议**接入 Git / Web 搜索 / DB 等外部工具
 
@@ -260,7 +260,7 @@ coding-agent/
 ├── codebase/            # 代码理解：解析器、依赖图、调用图、影响分析、索引、检索
 ├── context/             # 上下文管理：装配、预算、噪声过滤、压缩、外置存储
 ├── sandbox/             # 沙箱抽象 + Docker 后端、事务、补丁、错误分类
-├── tools/               # 37 个工具：文件 / 沙箱 / 事务 / 代码库 / 测试 / 子 Agent
+├── tools/               # 37 个内置工具：文件 / 沙箱 / 事务 / 代码库 / 测试 / 子 Agent
 ├── middleware/          # 中间件：思考路由、压缩、熔断、过滤、缓存、指标、轨迹
 ├── memory/              # 项目记忆与会话记忆
 ├── skills/              # 技能系统：注册表 + 55 个技能定义
@@ -269,8 +269,15 @@ coding-agent/
 ├── api/                 # FastAPI 网关：认证、审批、SSE、文件、指标
 ├── frontend/            # React 19 Web 界面
 ├── evals/               # 评测框架：数据集、运行器、评分器、报告
+├── benchmarks/          # 基准测试：任务集 + 运行器
+├── perf/                # 性能调优：缓存调参、优化器、剖析器
 ├── prompts/             # 系统提示词
-├── tests/               # pytest 测试套件（130 个）
+├── queries/             # Tree-sitter 查询定义（python_tags.scm）
+├── scripts/             # 开发辅助脚本（import skills、检查 imports 等）
+├── docs/                # 文档与架构决策记录（ADR）
+├── deploy/              # Docker 一键部署（docker-compose + healthcheck）
+├── docker/              # 沙箱镜像 Dockerfile
+├── tests/               # pytest 测试套件（219 个，含 contracts/integration/scenarios）
 └── pyproject.toml       # 项目配置（依赖、ruff、pytest）
 ```
 
@@ -294,7 +301,7 @@ pytest --cov
 pytest -rs
 ```
 
-**当前状态**：`130 passed, 13 skipped`（Linux + Windows 双平台 CI 全绿）
+**当前状态**：`211 passed, 5 skipped, 3 integration deselected`（共 219 个用例；Linux + Windows 双平台 CI 全绿）
 
 ### 端到端评测
 
