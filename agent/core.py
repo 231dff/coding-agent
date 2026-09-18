@@ -2,16 +2,22 @@
 
 集成：
 - 多 Provider 模型支持
-- 沙箱工厂（SandboxPool）
+- 沙箱工厂（SandboxPool，不池化）
 - 条件化思考（ThinkingRouter）
 - Content 剥离（ContentStripper）
 - 会话持久化（SQLite checkpointer）
 - 双层记忆（Cards + Retrieval）
 - LangGraph Store 后端
+- 幂等性保护（IdempotencyMiddleware）
 
 性能优化：
 - 沙箱启动与代码库分析并行执行
 - 检索器延迟初始化（不阻塞启动）
+
+安全：
+- 幂等性中间件防止重复写操作
+- 日志脱敏（见 observability/redact.py）
+- 沙箱 release 不做任何删除（见 sandbox/pool.py）
 """
 
 from __future__ import annotations
@@ -38,10 +44,16 @@ from codebase.indexer import (
     create_index_status_tool,
     create_search_tool,
 )
+
+# ---------- 代码库分析 ----------
 from codebase.parser import CodeParser
 from codebase.repo_map import RepoMapBuilder, create_repo_map_tool
+
+# ---------- 上下文 ----------
 from context.assembly import ContextAssembler
 from context.status_bar import AgentStatusBar
+
+# ---------- 记忆 ----------
 from memory.cards import user_card_repo
 from memory.store import (
     get_store as get_memory_store,
@@ -49,13 +61,19 @@ from memory.store import (
 from memory.store import (
     store_backend_info,
 )
-from middleware.circuit_breaker import CircuitBreakerConfig, CircuitBreakerMiddleware
+from middleware.circuit_breaker import (
+    CircuitBreakerConfig,
+    CircuitBreakerMiddleware,
+)
 from middleware.content_stripper import create_content_stripper_middleware
 from middleware.context_compaction import (
     CompactionPipelineConfig,
     ContextCompactionMiddleware,
 )
+
+# ---------- 中间件 ----------
 from middleware.dependency_check import create_dependency_check_middleware
+from middleware.idempotency import create_idempotency_middleware
 from middleware.metrics import MetricsMiddleware
 from middleware.prompt_cache import create_prompt_cache_middleware
 from middleware.retrieval_inject import create_retrieval_inject_middleware
@@ -64,15 +82,23 @@ from middleware.thinking_router import create_thinking_router_middleware
 from middleware.tool_filter import create_tool_filter_middleware
 from middleware.tool_search import create_tool_search_tool
 from middleware.trajectory import TrajectoryMiddleware
+
+# ---------- 可观测性 ----------
 from observability.trajectory_writer import TrajectoryWriter
+
+# ---------- 沙箱 ----------
 from sandbox.docker_backend import DockerSandbox
 from sandbox.patch import create_apply_patch_tool
 from sandbox.pool import SandboxPool
 from skills.loader import create_load_skill_tool
+
+# ---------- 技能 ----------
 from skills.registry import SkillRegistry
 from tools.context_ops import CONTEXT_TOOLS
 from tools.context_ops import bind as bind_context
 from tools.lint import validate_tools
+
+# ---------- 工具 ----------
 from tools.registry import build_default_tools
 from tools.sandbox_ops import SANDBOX_TOOLS
 from tools.sandbox_ops import bind as bind_sandbox
@@ -90,6 +116,7 @@ from tools.test_ops import bind as bind_test
 from tools.transaction_ops import TRANSACTION_TOOLS
 from tools.transaction_ops import bind as bind_tx
 
+# ---------- MCP ----------
 try:
     from mcp_client.client import MCPConfig, load_mcp_tools_sync
 
@@ -104,7 +131,7 @@ except ImportError as _e:
 
 
 # ============================================================
-# 全局沙箱工厂
+# 全局沙箱工厂（进程级单例）
 # ============================================================
 
 _SANDBOX_POOL: SandboxPool | None = None
@@ -112,6 +139,11 @@ _SANDBOX_POOL_LOCK = threading.Lock()
 
 
 def _get_sandbox_pool() -> SandboxPool:
+    """返回进程级沙箱工厂。
+
+    注意：SandboxPool 现在不做池化（每个 acquire 返回全新容器），
+    详见 sandbox/pool.py 的模块 docstring。
+    """
     global _SANDBOX_POOL
     with _SANDBOX_POOL_LOCK:
         if _SANDBOX_POOL is None:
@@ -126,6 +158,7 @@ def _get_sandbox_pool() -> SandboxPool:
 
 
 def load_system_prompt(agent_home: Path) -> str:
+    """加载系统提示词（从 Agent 自身目录读取）。"""
     path = agent_home / "prompts" / "system_v1.md"
     if not path.exists():
         raise FileNotFoundError(f"系统提示词文件不存在: {path}")
@@ -133,6 +166,7 @@ def load_system_prompt(agent_home: Path) -> str:
 
 
 def load_project_memory(project_path: Path) -> str:
+    """加载项目记忆（从用户项目里读取，启动时读一次）。"""
     for name in ("AGENTS.md", "CLAUDE.md", "CODING_AGENT.md"):
         p = project_path / name
         if p.is_file():
@@ -141,6 +175,7 @@ def load_project_memory(project_path: Path) -> str:
 
 
 def render_tool_definitions(tools: list[Any]) -> str:
+    """渲染工具定义为字母序排列的稳定文本（用于前缀哈希校验）。"""
     lines = []
     for t in sorted(tools, key=lambda x: x.name):
         desc = (t.description or "").split("\n", 1)[0].strip()
@@ -149,6 +184,7 @@ def render_tool_definitions(tools: list[Any]) -> str:
 
 
 def build_mcp_config(agent_home: Path):
+    """构建 MCP Server 配置。"""
     if not _MCP_AVAILABLE:
         raise RuntimeError("MCP 不可用（mcp_client.client 导入失败）")
 
@@ -169,6 +205,7 @@ def build_mcp_config(agent_home: Path):
 
 
 def _load_mcp_in_thread(config, timeout: float = 15.0) -> list[Any]:
+    """在独立线程里加载 MCP，超时或失败返回空，不阻塞启动。"""
     if load_mcp_tools_sync is None:
         return []
 
@@ -188,11 +225,17 @@ def _load_mcp_in_thread(config, timeout: float = 15.0) -> list[Any]:
 
 
 # ============================================================
-# LLM 初始化
+# LLM 初始化（多 Provider + temperature 可选）
 # ============================================================
 
 
 def build_llm(cfg: AgentConfig):
+    """初始化 LLM。
+
+    temperature 为 None 时不发送该参数——某些模型（如 kimi-k3、
+    deepseek-reasoner、o1）不接受 temperature，会返回 400。
+    """
+    # ---------- Anthropic 原生接口 ----------
     if cfg.model_provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
@@ -209,6 +252,7 @@ def build_llm(cfg: AgentConfig):
 
         return ChatAnthropic(**kwargs)
 
+    # ---------- OpenAI 兼容接口 ----------
     from langchain_openai import ChatOpenAI
 
     print(
@@ -235,6 +279,7 @@ def build_llm(cfg: AgentConfig):
 
 
 def _build_compaction_llm(cfg: AgentConfig):
+    """压缩用轻量模型：优先环境变量 AGENT_COMPACTION_MODEL，其次主模型。"""
     cheap_model = os.getenv("AGENT_COMPACTION_MODEL", "")
     if not cheap_model:
         return build_llm(cfg)
@@ -255,6 +300,8 @@ def _build_compaction_llm(cfg: AgentConfig):
 
 @dataclass
 class AgentRuntime:
+    """Agent 运行时句柄。"""
+
     agent: Any
     sandbox: DockerSandbox
     assembler: ContextAssembler
@@ -272,6 +319,8 @@ class AgentRuntime:
     _planning_graph: Any = field(default=None, init=False, repr=False)
     _repair_graph: Any = field(default=None, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
+
+    # ---------- 转发到底层 agent ----------
 
     def invoke(self, *args, **kwargs):
         return self.agent.invoke(*args, **kwargs)
@@ -294,6 +343,8 @@ class AgentRuntime:
     def get_state(self, *args, **kwargs):
         return self.agent.get_state(*args, **kwargs)
 
+    # ---------- 懒加载图 ----------
+
     @property
     def planning_graph(self):
         if self._planning_graph is None:
@@ -313,7 +364,10 @@ class AgentRuntime:
             self._repair_graph = build_repair_graph(self.agent, _exec, self.checkpointer)
         return self._repair_graph
 
+    # ---------- 生命周期 ----------
+
     def close(self) -> None:
+        """释放资源。"""
         if self._closed:
             return
         self._closed = True
@@ -342,6 +396,8 @@ class AgentRuntime:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
+
+    # ---------- 状态查询 ----------
 
     def check_prefix_stability(self) -> bool:
         return self.assembler.check_prefix_stability()
@@ -403,7 +459,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     """组装完整的 Coding Agent。
 
     性能优化：
-    - 沙箱启动与代码库分析并行（节省 max(A, B) - (A+B)/2 时间）
+    - 沙箱启动与代码库分析并行
     """
     from observability.logger import get_logger
 
@@ -588,34 +644,49 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     )
 
     middlewares = [
+        # 1. 条件化思考（最先跑，读原始 user 消息）
         create_thinking_router_middleware(
             provider=cfg.provider_id,
             enabled=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
             strategy=os.getenv("AGENT_THINKING_STRATEGY", "auto"),
         ),
+        # 2. Content 剥离（清除带 tool_calls 的历史 AI content）
         create_content_stripper_middleware(
             enabled=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
         ),
+        # 3. 第 2 层记忆：检索注入
         create_retrieval_inject_middleware(
             enabled=(os.getenv("AGENT_RETRIEVAL", "true").lower() == "true"),
             top_k=int(os.getenv("AGENT_RETRIEVAL_TOP_K", "3")),
         ),
+        # 4. 幂等性保护（写类工具相同参数只执行一次）
+        create_idempotency_middleware(
+            enabled=(os.getenv("AGENT_IDEMPOTENCY", "true").lower() == "true"),
+        ),
+        # 5. 上下文压缩
         ContextCompactionMiddleware(
             model=compaction_llm,
             workspace=str(cfg.project_path),
             config=CompactionPipelineConfig(model_window=cfg.model_window),
         ),
+        # 6. 工具过滤（按激活的 skill）
         create_tool_filter_middleware(all_tool_names, skill_tool_map),
+        # 7. 指标采集
         MetricsMiddleware(
             store=metrics_store,
             model_name=cfg.model,
             debug=False,
             on_metric=_on_metric,
         ),
+        # 8. 依赖检查（修改代码前检查调用方）
         create_dependency_check_middleware(analyzer),
+        # 9. 熔断器
         circuit_breaker,
+        # 10. 状态栏注入
         StatusBarMiddleware(status_bar),
+        # 11. 轨迹持久化
         trajectory_mw,
+        # 12. 缓存标记（最后跑，反映最终请求）
         create_prompt_cache_middleware(
             cache_ttl="5m",
             default_cache_key="coding-agent-v1",
@@ -643,6 +714,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         thinking_router=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
         content_stripper=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
         retrieval=(os.getenv("AGENT_RETRIEVAL", "true").lower() == "true"),
+        idempotency=(os.getenv("AGENT_IDEMPOTENCY", "true").lower() == "true"),
         user_memory=(os.getenv("AGENT_USER_MEMORY", "true").lower() == "true"),
         memory_backend=backend_info.get("backend", "?"),
         memory_type=backend_info.get("type", "?"),

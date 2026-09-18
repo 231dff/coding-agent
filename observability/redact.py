@@ -17,9 +17,21 @@ import re
 from typing import Any
 
 # 敏感字段名（不区分大小写）
+# 覆盖常见 token 变体：access / auth / refresh / bearer / id / session
 SENSITIVE_KEY_RE = re.compile(
-    r"(api[_-]?key|access[_-]?token|auth[_-]?token|password|"
-    r"secret|credential|private[_-]?key)",
+    r"("
+    r"api[_-]?key|"
+    r"access[_-]?token|"
+    r"auth[_-]?token|"
+    r"refresh[_-]?token|"
+    r"bearer[_-]?token|"
+    r"id[_-]?token|"
+    r"session[_-]?token|"
+    r"password|"
+    r"secret|"
+    r"credential|"
+    r"private[_-]?key"
+    r")",
     re.IGNORECASE,
 )
 
