@@ -51,7 +51,7 @@ jobs:
         run: |
           pytest tests/ -v --tb=short --color=yes \
             --ignore=tests/integration \
-            --cov=coding-agent \
+            --cov=. \
             --cov-fail-under=25 \
             --cov-report=xml \
             --durations=10
