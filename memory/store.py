@@ -38,11 +38,24 @@ def create_store(
         return InMemoryStore()
 
     if backend == "sqlite":
+        import sqlite3
         from langgraph.store.sqlite import SqliteStore
 
         path = conn_string or ".agent_memory/store.db"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        return SqliteStore(conn_string=f"file:{path}")
+
+        # ★ 用 sqlite3.Connection 而不是 conn_string
+        conn = sqlite3.connect(
+            str(path),
+            check_same_thread=False,
+            timeout=30.0,
+        )
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.DatabaseError:
+            pass
+
+        return SqliteStore(conn)
 
     if backend == "postgres":
         from langgraph.store.postgres import PostgresStore

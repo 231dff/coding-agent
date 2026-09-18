@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, master, develop]
   pull_request:
-    branches: [main, master, develop]
   workflow_dispatch:
 
 concurrency:
@@ -12,6 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ============================================================
+  # 单元测试 + 覆盖率
+  # ============================================================
   test:
     name: Test (${{ matrix.os }} / Py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
@@ -19,32 +21,21 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12"]
 
     env:
-      # ---- 关闭一切外部依赖 ----
       LANGCHAIN_TRACING_V2: "false"
-      LANGCHAIN_TRACING: "false"
       AGENT_ENABLE_MCP: "false"
-
-      # ---- 条件化思考 ----
       AGENT_THINKING_ROUTER: "true"
       AGENT_THINKING_STRATEGY: "auto"
-
-      # ---- 冒烟测试默认关闭（需要真 LLM 时手动触发） ----
       AGENT_SMOKE_REAL: ""
-
-      # ---- 编码兼容（Windows runner 关键） ----
-      # PYTHONIOENCODING 只影响 stdout/stderr
-      # PYTHONUTF8=1 让 open() 默认用 UTF-8，修 write_text("中文") 的 charmap 报错
       PYTHONIOENCODING: "utf-8"
       PYTHONUTF8: "1"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -55,42 +46,55 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Debug - show key packages (non-fatal)
-        # 之前这里用 `pip list | head -50` 触发 SIGPIPE 导致 exit 120，
-        # 现在改成只打印关键包版本，并加 continue-on-error 兜底。
-        continue-on-error: true
+      - name: Run unit tests with coverage
         shell: bash
         run: |
-          python -c "import sys; print('python:', sys.version)" || true
-          python -c "import langchain; print('langchain:', langchain.__version__)" || true
-          python -c "import pytest; print('pytest:', pytest.__version__)" || true
+          pytest tests/ -v --tb=short --color=yes \
+            --ignore=tests/integration \
+            --cov=agent --cov=tools --cov=context \
+            --cov=middleware --cov=memory --cov=observability \
+            --cov-report=term-missing \
+            --cov-fail-under=50 \
+            --durations=10
 
-      - name: Run tests
-        shell: bash
-        run: |
-          pytest tests/ -v --tb=short --color=yes --durations=10
-
-      - name: Upload pytest cache (for debugging)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-cache-${{ matrix.os }}-${{ matrix.python-version }}
-          path: .pytest_cache/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  lint:
-    name: Lint
+  # ============================================================
+  # 契约测试（独立 job，失败一眼定位）
+  # ============================================================
+  contract:
+    name: Contract Tests
     runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      - name: Install linters
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run contract tests
+        run: |
+          pytest tests/contracts/ -v --tb=short
+
+  # ============================================================
+  # 代码风格
+  # ============================================================
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ruff
         run: |
           python -m pip install --upgrade pip
           pip install ruff
@@ -100,3 +104,27 @@ jobs:
 
       - name: Ruff format check
         run: ruff format --check .
+
+  # ============================================================
+  # 依赖审计
+  # ============================================================
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: Audit
+        run: |
+          pip install -e . --no-deps
+          pip-audit || true
