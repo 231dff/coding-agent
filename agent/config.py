@@ -22,7 +22,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-
 _AGENT_HOME = Path(__file__).resolve().parent.parent
 
 
@@ -443,8 +442,8 @@ class AgentConfig:
             raise ValueError(f"项目路径不存在: {self.project_path}")
         if not self.api_key and self.provider_id != "ollama":
             raise ValueError(
-                f"API Key 未设置。\n"
-                f"请重新运行 `coding-agent` 触发配置向导。"
+                "API Key 未设置。\n"
+                "请重新运行 `coding-agent` 触发配置向导。"
             )
         if self.temperature is not None:
             if self.temperature < 0 or self.temperature > 2:
