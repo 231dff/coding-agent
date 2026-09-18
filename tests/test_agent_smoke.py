@@ -1,4 +1,4 @@
-﻿"""Day 3: Agent 冒烟测试。3 个场景验证基础闭环。
+"""Day 3: Agent 冒烟测试。3 个场景验证基础闭环。
 
 这些测试需要真实 LLM 调用。国内环境访问 OpenAI 会被 403 拒绝。
 默认 skip，通过环境变量启用：
@@ -37,9 +37,9 @@ pytestmark = pytest.mark.skipif(
 def agent(tmp_path_factory):
     ws = tmp_path_factory.mktemp("agent_ws")
     (ws / "calc.py").write_text(
-    "def add(a, b):\n    return a - b  # BUG: should be +\n",
-    encoding="utf-8",
-)
+        "def add(a, b):\n    return a - b  # BUG: should be +\n",
+        encoding="utf-8",
+    )
     cfg = AgentConfig.for_test(workspace=str(ws), model=_SMOKE_MODEL)
     rt = build_agent(cfg)
     yield rt, ws
@@ -65,9 +65,9 @@ def test_scenario_rename_function(agent):
     """场景 2：重命名函数。"""
     rt, ws = agent
     (ws / "util.py").write_text(
-    "def old_name():\n    return 42\n",
-    encoding="utf-8",
-)
+        "def old_name():\n    return 42\n",
+        encoding="utf-8",
+    )
     _run(rt, ws, "把 util.py 里的 old_name 重命名为 new_name，只改这一个文件。")
     content = (ws / "util.py").read_text(encoding="utf-8")
     assert "new_name" in content

@@ -14,6 +14,7 @@ temperature 的模型）。
 base_url 从 providers 表查，不硬编码；这样切换 Provider 时不会打到
 错误的端点（如 qwen 打到 OpenAI 官方会被 403 拒绝）。
 """
+
 from __future__ import annotations
 
 import os
@@ -41,6 +42,7 @@ _load_env()
 # 配置文件路径
 # ============================================================
 
+
 def global_config_file() -> Path:
     return Path.home() / ".coding-agent" / "config.yaml"
 
@@ -54,6 +56,7 @@ def load_yaml_config(path: Path) -> dict:
         return {}
     try:
         import yaml
+
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
@@ -62,6 +65,7 @@ def load_yaml_config(path: Path) -> dict:
 
 def save_yaml_config(path: Path, data: dict) -> None:
     import yaml
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
@@ -72,6 +76,7 @@ def save_yaml_config(path: Path, data: dict) -> None:
 # ============================================================
 # 项目路径解析
 # ============================================================
+
 
 def resolve_project_path(explicit: str | Path | None = None) -> Path:
     """解析用户项目路径。
@@ -108,6 +113,7 @@ def resolve_project_path(explicit: str | Path | None = None) -> Path:
 # API Key 加载
 # ============================================================
 
+
 def _load_api_key(provider_id: str = "", env_key: str = "") -> str:
     """按优先级加载 API Key。
 
@@ -120,6 +126,7 @@ def _load_api_key(provider_id: str = "", env_key: str = "") -> str:
     if provider_id:
         try:
             from agent.credentials import get_api_key
+
             key = get_api_key(provider_id)
             if key:
                 return key
@@ -158,6 +165,7 @@ def _load_api_key(provider_id: str = "", env_key: str = "") -> str:
 # ============================================================
 # 解析辅助
 # ============================================================
+
 
 def _parse_temperature(raw) -> float | None:
     """解析 temperature。
@@ -206,6 +214,7 @@ def _parse_bool(raw, default: bool = False) -> bool:
 # AgentConfig
 # ============================================================
 
+
 @dataclass
 class AgentConfig:
     """Agent 运行时配置。"""
@@ -216,8 +225,8 @@ class AgentConfig:
 
     # 模型
     model: str
-    model_provider: str          # openai / anthropic
-    provider_id: str             # qwen / openai / deepseek / ...
+    model_provider: str  # openai / anthropic
+    provider_id: str  # qwen / openai / deepseek / ...
     base_url: str
     api_key: str
     model_window: int
@@ -232,21 +241,11 @@ class AgentConfig:
     enable_mcp: bool = False
 
     # ---------- 缓存字段（不参与序列化） ----------
-    _meta_dir_cache: Path | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
-    _index_dir_cache: Path | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
-    _trajectory_dir_cache: Path | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
-    _memory_dir_cache: Path | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
-    _session_dir_cache: Path | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
+    _meta_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _index_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _trajectory_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _memory_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
+    _session_dir_cache: Path | None = field(default=None, init=False, repr=False, compare=False)
 
     # ========================================================
     # 加载器
@@ -288,11 +287,11 @@ class AgentConfig:
 
         # 从 providers 表查默认 langchain_provider
         from agent.providers import get_provider
+
         provider_info = get_provider(provider_id)
 
-        model_provider = (
-            get("langchain_provider")
-            or (provider_info.langchain_provider if provider_info else "openai")
+        model_provider = get("langchain_provider") or (
+            provider_info.langchain_provider if provider_info else "openai"
         )
 
         env_key = provider_info.env_key if provider_info else ""
@@ -350,6 +349,7 @@ class AgentConfig:
 
         # ★ 从 providers 表查 base_url / env_key / langchain_provider
         from agent.providers import get_provider
+
         info = get_provider(provider_id)
 
         base_url = info.base_url if info else ""
@@ -359,19 +359,13 @@ class AgentConfig:
         # 1. provider 对应的环境变量（如 DASHSCOPE_API_KEY）
         # 2. 通用的 OPENAI_API_KEY
         # 3. dummy（部分本地端点如 Ollama 不需要 key）
-        api_key = (
-            _os.getenv(env_key, "")
-            or _os.getenv("OPENAI_API_KEY", "")
-            or "dummy"
-        )
+        api_key = _os.getenv(env_key, "") or _os.getenv("OPENAI_API_KEY", "") or "dummy"
 
         return cls(
             project_path=Path(workspace).resolve(),
             agent_home=_AGENT_HOME,
             model=model_name,
-            model_provider=(
-                info.langchain_provider if info else "openai"
-            ),
+            model_provider=(info.langchain_provider if info else "openai"),
             provider_id=provider_id,
             base_url=base_url,
             api_key=api_key,
@@ -441,15 +435,10 @@ class AgentConfig:
         if not self.project_path.is_dir():
             raise ValueError(f"项目路径不存在: {self.project_path}")
         if not self.api_key and self.provider_id != "ollama":
-            raise ValueError(
-                "API Key 未设置。\n"
-                "请重新运行 `coding-agent` 触发配置向导。"
-            )
+            raise ValueError("API Key 未设置。\n请重新运行 `coding-agent` 触发配置向导。")
         if self.temperature is not None:
             if self.temperature < 0 or self.temperature > 2:
-                raise ValueError(
-                    f"temperature 必须在 [0, 2]: {self.temperature}"
-                )
+                raise ValueError(f"temperature 必须在 [0, 2]: {self.temperature}")
         if self.timeout < 10:
             raise ValueError(f"timeout 至少 10 秒: {self.timeout}")
         if self.model_window < 1000:
@@ -467,9 +456,7 @@ class AgentConfig:
             "base_url": self.base_url,
             "api_key": "***" if self.api_key else "(empty)",
             "model_window": self.model_window,
-            "temperature": (
-                self.temperature if self.temperature is not None else "(不发送)"
-            ),
+            "temperature": (self.temperature if self.temperature is not None else "(不发送)"),
             "timeout": self.timeout,
             "max_iterations": self.max_iterations,
             "enable_mcp": self.enable_mcp,
