@@ -44,10 +44,24 @@ from memory.store import (
     current_user_id,
     store_backend_info,
 )
-from observability.logger import bind_context, configure_logging, get_logger
+from observability.logger import (
+    bind_context,
+    configure_logging,
+    get_logger,
+)
 from observability.metrics_display import MetricsDisplay
-from observability.tracing import configure as configure_tracing
-from observability.tracing import is_enabled, status_text
+from observability.trace import (
+    get_trace_id,
+    new_trace_id,
+    reset_trace_id,
+)
+from observability.tracing import (
+    configure as configure_tracing,
+)
+from observability.tracing import (
+    is_enabled,
+    status_text,
+)
 
 console = Console()
 log = get_logger("main")
@@ -326,10 +340,7 @@ def show_memory_status() -> None:
 
 
 def _do_extraction(rt, thread_id: str) -> None:
-    """同步执行提炼（被异步线程 / 启动补提炼调用）。
-
-    不做任何 terminal 输出，静默执行。
-    """
+    """同步执行提炼（被异步线程 / 启动补提炼调用）。"""
     try:
         config = {"configurable": {"thread_id": thread_id}}
         state = rt.agent.get_state(config)
@@ -381,7 +392,6 @@ def _do_extraction(rt, thread_id: str) -> None:
             except Exception as e:
                 log.warning("session_summary_failed", error=str(e))
 
-        # 完成 → 清 pending
         remove_pending(rt.config.meta_dir, thread_id)
 
     except Exception as e:
@@ -389,16 +399,9 @@ def _do_extraction(rt, thread_id: str) -> None:
 
 
 def extract_and_save_memory_async(rt, thread_id: str) -> None:
-    """会话结束时异步提炼。
-
-    流程：
-    1. 写 pending 标记（保险）
-    2. 启动 daemon 线程跑提炼
-    3. 最多等 1 秒
-    """
+    """会话结束时异步提炼（写 pending + daemon 线程 + 最多等 1s）。"""
     meta_dir = rt.config.meta_dir
 
-    # 写 pending（如果线程被强杀，下次启动会补）
     try:
         add_pending(
             meta_dir,
@@ -411,7 +414,6 @@ def extract_and_save_memory_async(rt, thread_id: str) -> None:
     except Exception as e:
         log.warning("add_pending_failed", error=str(e))
 
-    # 异步线程
     def _run():
         try:
             _do_extraction(rt, thread_id)
@@ -420,23 +422,17 @@ def extract_and_save_memory_async(rt, thread_id: str) -> None:
 
     t = threading.Thread(target=_run, daemon=True, name="memory-extract")
     t.start()
-
-    # 最多等 1 秒
     t.join(timeout=1.0)
 
 
 def process_pending_on_startup(rt, current_thread_id: str) -> None:
-    """启动时检查 pending 任务，补跑。
-
-    跳过当前 thread（因为还没结束）。
-    """
+    """启动时检查 pending 任务，后台补跑。"""
     try:
         meta_dir = rt.config.meta_dir
         tasks = load_pending(meta_dir)
         if not tasks:
             return
 
-        # 过滤掉当前 thread
         to_process = [t for t in tasks if t.thread_id != current_thread_id]
         if not to_process:
             return
@@ -697,7 +693,11 @@ def run_single_task(rt, task: str, thread_id: str, display: MetricsDisplay) -> N
     except KeyboardInterrupt:
         console.print("\n[yellow]已中断[/yellow]")
     except Exception as e:
-        log.error("single_task_failed", error_type=type(e).__name__, error=str(e))
+        log.error(
+            "single_task_failed",
+            error_type=type(e).__name__,
+            error=str(e),
+        )
         console.print(f"\n[red]错误: {type(e).__name__}: {e}[/red]")
 
 
@@ -764,7 +764,6 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         if lower_input == "/trace":
             show_trace(display)
             continue
-
         if lower_input == "/cards":
             show_cards()
             continue
@@ -792,9 +791,11 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                 continue
             task_text = handled
 
+        # ★ 绑定上下文（含 trace_id）
         bind_context(
             session_id=rt.config.project_path.name,
             thread_id=thread_id,
+            trace_id=get_trace_id(),
         )
 
         try:
@@ -807,7 +808,11 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         except KeyboardInterrupt:
             console.print("\n[yellow]已中断[/yellow]")
         except Exception as e:
-            log.error("task_failed", error_type=type(e).__name__, error=str(e))
+            log.error(
+                "task_failed",
+                error_type=type(e).__name__,
+                error=str(e),
+            )
             console.print(f"\n[red]错误: {type(e).__name__}: {e}[/red]\n")
 
 
@@ -840,6 +845,9 @@ def main() -> int:
     json_logs = os.getenv("LOG_JSON", "false").lower() == "true"
     log_level = os.getenv("LOG_LEVEL", "INFO")
     configure_logging(level=log_level, json_output=json_logs)
+
+    # ★ 生成 trace_id
+    tid = new_trace_id()
 
     if os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true":
         configure_tracing(
@@ -878,15 +886,20 @@ def main() -> int:
 
     console.print(f"[dim]正在启动 Agent (project={project_path})...[/dim]")
     console.print(f"[dim]会话 ID: {thread_id}[/dim]")
+    console.print(f"[dim]trace_id: {tid}[/dim]")  # ★ 显示
 
     try:
         rt = build_agent(cfg)
     except Exception as e:
-        log.error("agent_start_failed", error_type=type(e).__name__, error=str(e))
+        log.error(
+            "agent_start_failed",
+            error_type=type(e).__name__,
+            error=str(e),
+        )
         console.print(f"[red]Agent 启动失败: {type(e).__name__}: {e}[/red]")
         return 1
 
-    # ★ 启动时补跑上次未完成的提炼（后台线程，不阻塞）
+    # ★ 启动时补跑 pending 提炼
     try:
         process_pending_on_startup(rt, thread_id)
     except Exception:
@@ -902,7 +915,7 @@ def main() -> int:
             print_welcome(project_path, rt)
             run_interactive(rt, thread_id, display)
     finally:
-        # ★ 异步提炼：不阻塞退出
+        # ★ 异步提炼，不阻塞退出
         try:
             extract_and_save_memory_async(rt, thread_id)
         except Exception:
@@ -910,6 +923,7 @@ def main() -> int:
 
         display.stop()
         rt.close()
+        reset_trace_id()
 
     return 0
 

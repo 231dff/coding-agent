@@ -1,87 +1,95 @@
 """结构化日志。
 
-JSON lines 格式，便于日志聚合系统解析。
-也提供人类可读模式（开发环境）。
+处理器链：
+1. 注入 trace_id
+2. 脱敏（key / password / token / DSN 密码）
+3. 时间戳
+4. 日志级别
+5. 渲染（dev: 彩色，prod: JSON）
+
+用法：
+    from observability.logger import (
+        configure_logging, get_logger, bind_context,
+    )
+
+    configure_logging(level="INFO", json_output=False)
+    log = get_logger("core")
+    log.info("event", key="value")
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import time
-from contextvars import ContextVar
-from typing import Any
 
 import structlog
 
-# 请求级上下文
-_request_id: ContextVar[str] = ContextVar("request_id", default="")
-_session_id: ContextVar[str] = ContextVar("session_id", default="")
-_thread_id: ContextVar[str] = ContextVar("thread_id", default="")
+from observability.redact import redact_deep
+from observability.trace import get_trace_id
+
+# ============================================================
+# 自定义 processor
+# ============================================================
 
 
-def bind_context(
-    request_id: str = "",
-    session_id: str = "",
-    thread_id: str = "",
-) -> None:
-    """绑定请求上下文。在每轮对话开始时调用。"""
-    if request_id:
-        _request_id.set(request_id)
-    if session_id:
-        _session_id.set(session_id)
-    if thread_id:
-        _thread_id.set(thread_id)
-
-
-def _add_timestamp(logger, method_name, event_dict):
-    """structlog processor：添加时间戳。"""
-    event_dict["timestamp"] = time.time()
+def _add_trace_id(logger, method_name, event_dict):
+    """注入当前 trace_id。"""
+    tid = get_trace_id()
+    if tid:
+        event_dict["trace_id"] = tid
     return event_dict
 
 
-def _add_context(logger, method_name, event_dict):
-    """structlog processor：添加上下文信息。"""
-    if _request_id.get():
-        event_dict["request_id"] = _request_id.get()
-    if _session_id.get():
-        event_dict["session_id"] = _session_id.get()
-    if _thread_id.get():
-        event_dict["thread_id"] = _thread_id.get()
-    return event_dict
+def _redact_processor(logger, method_name, event_dict):
+    """脱敏（key / token / password / DSN 密码）。"""
+    return redact_deep(event_dict)
 
 
-def _render_json(logger, method_name, event_dict):
-    """structlog processor：JSON 序列化。"""
-    return json.dumps(event_dict, ensure_ascii=False, default=str)
+# ============================================================
+# 配置
+# ============================================================
 
 
 def configure_logging(
     level: str = "INFO",
     json_output: bool = False,
 ) -> None:
-    """配置日志。
+    """配置 structlog。
 
     Args:
-        level: 日志级别（DEBUG / INFO / WARNING / ERROR）。
-        json_output: True 输出 JSON lines；False 输出人类可读格式。
+        level: 日志级别（DEBUG / INFO / WARNING / ERROR）
+        json_output: True 输出 JSON，False 输出彩色文本
     """
-    processors = [
+    shared_processors = [
+        # contextvars 里的上下文（bind_context 绑定）
         structlog.contextvars.merge_contextvars,
+        # 日志级别
         structlog.processors.add_log_level,
-        _add_timestamp,
-        _add_context,
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
+        # 注入 trace_id
+        _add_trace_id,
+        # 脱敏
+        _redact_processor,
+        # 时间戳
+        structlog.processors.TimeStamper(fmt="iso"),
     ]
 
     if json_output:
-        processors.append(_render_json)
+        renderer = structlog.processors.JSONRenderer(
+            ensure_ascii=False,
+        )
     else:
-        processors.append(structlog.dev.ConsoleRenderer(colors=True))
+        renderer = structlog.dev.ConsoleRenderer(
+            colors=True,
+            exception_formatter=structlog.dev.plain_traceback,
+        )
+
+    # Python 标准 logging 也重定向到 structlog
+    logging.basicConfig(
+        format="%(message)s",
+        level=getattr(logging, level.upper(), logging.INFO),
+    )
 
     structlog.configure(
-        processors=processors,
+        processors=shared_processors + [renderer],
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(logging, level.upper(), logging.INFO)
         ),
@@ -91,62 +99,26 @@ def configure_logging(
     )
 
 
-def get_logger(name: str = "coding-agent"):
-    """获取 logger。"""
+def get_logger(name: str = "app"):
+    """获取带 name 的 logger。"""
     return structlog.get_logger(name)
 
 
-# ============================================================
-# 便捷日志函数
-# ============================================================
+def bind_context(**kwargs) -> None:
+    """绑定上下文到所有后续日志（同一 async task / 线程内有效）。
+
+    典型用法：
+        bind_context(session_id="sess-xxx", thread_id="abc")
+        log.info("event")  # 自动带 session_id 和 thread_id
+    """
+    structlog.contextvars.bind_contextvars(**kwargs)
 
 
-def log_llm_call(
-    model: str,
-    input_tokens: int,
-    output_tokens: int,
-    duration_s: float,
-    cost_usd: float = 0.0,
-) -> None:
-    get_logger("llm").info(
-        "llm_call",
-        model=model,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        duration_s=round(duration_s, 3),
-        cost_usd=round(cost_usd, 6),
-    )
+def unbind_context(*keys: str) -> None:
+    """解绑指定 key 的上下文。"""
+    structlog.contextvars.unbind_contextvars(*keys)
 
 
-def log_tool_call(
-    tool_name: str,
-    duration_s: float,
-    success: bool,
-    error: str = "",
-) -> None:
-    get_logger("tool").info(
-        "tool_call",
-        tool=tool_name,
-        duration_s=round(duration_s, 3),
-        success=success,
-        error=error[:200] if error else "",
-    )
-
-
-def log_compaction(layer: str, before_tokens: int, after_tokens: int) -> None:
-    get_logger("compaction").info(
-        "compaction",
-        layer=layer,
-        before_tokens=before_tokens,
-        after_tokens=after_tokens,
-        saved_tokens=before_tokens - after_tokens,
-    )
-
-
-def log_error(error: Exception, context: dict[str, Any] | None = None) -> None:
-    get_logger("error").error(
-        "exception",
-        error_type=type(error).__name__,
-        error_message=str(error),
-        context=context or {},
-    )
+def clear_context() -> None:
+    """清空所有绑定的上下文。"""
+    structlog.contextvars.clear_contextvars()
