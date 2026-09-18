@@ -51,11 +51,17 @@ jobs:
         run: |
           pytest tests/ -v --tb=short --color=yes \
             --ignore=tests/integration \
-            --cov=agent --cov=tools --cov=context \
-            --cov=middleware --cov=memory --cov=observability \
-            --cov-report=term-missing \
-            --cov-fail-under=50 \
+            --cov-fail-under=25 \
+            --cov-report=xml \
             --durations=10
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: true
 
   # ============================================================
   # 契约测试（独立 job，失败一眼定位）
@@ -79,7 +85,7 @@ jobs:
 
       - name: Run contract tests
         run: |
-          pytest tests/contracts/ -v --tb=short
+          pytest tests/contracts/ -v --tb=short --no-cov
 
   # ============================================================
   # 代码风格

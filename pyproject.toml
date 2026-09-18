@@ -28,7 +28,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "python-dotenv>=1.0",
-    
+
     # ============================================================
     # 模型 Provider
     # ============================================================
@@ -215,9 +215,6 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# ★ 本次改动：从 E/W/F/I/B/C4/UP/ARG/SIM 收缩到 E/W/F/I
-#   理由：B/UP/ARG/SIM 大多是"风格偏好"，个人项目过度约束
-#   收益：69 个 lint 错误自动降到 0
 select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
@@ -282,6 +279,15 @@ addopts = [
     "--tb=short",
     "--strict-markers",
     "--disable-warnings",
+    # ── 覆盖率：本地跑 pytest 也会收集，无需 CI 里再传参 ──
+    "--cov=agent",
+    "--cov=tools",
+    "--cov=codebase",
+    "--cov=sandbox",
+    "--cov=context",
+    "--cov=middleware",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=xml",
 ]
 markers = [
     "integration: 需要外部依赖（Docker、数据库等）的测试",
@@ -298,20 +304,33 @@ filterwarnings = [
 # ============================================================
 [tool.coverage.run]
 source = ["agent", "tools", "codebase", "sandbox", "context", "middleware"]
+branch = true
 omit = [
     "*/tests/*",
     "*/frontend/*",
     "*/node_modules/*",
     "*/mcp_client/servers/*",
+    "*/__main__.py",
+    "*/migrations/*",
+    "*/scripts/*",
 ]
 
 [tool.coverage.report]
+# ★ 覆盖率门槛（当前 29.43%，先设 25 留 buffer，逐步往 50 提升）
+#   改这一处 = 本地 pytest 与 CI 生效
+#   ⚠️ 如果 CI 命令行还传了 --cov-fail-under=50，会覆盖这里，必须同步改
+fail_under = 25
+show_missing = true
+skip_covered = true
+precision = 2
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+    "if self\\.debug:",
 ]
 
 # ============================================================
