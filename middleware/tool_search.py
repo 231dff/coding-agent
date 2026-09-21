@@ -13,6 +13,9 @@ def create_tool_search_tool(all_tools: list):
 
     Args:
         all_tools: 全量工具列表（LangChain BaseTool 对象）。
+
+    Returns:
+        一个名为 search_tools 的 LangChain 工具。
     """
 
     @tool

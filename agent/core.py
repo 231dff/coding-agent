@@ -131,6 +131,32 @@ except ImportError as _e:
 
 
 # ============================================================
+# 环境变量开关（评测/精简模式用）
+# ============================================================
+
+
+def _env_bool(key: str, default: str = "true") -> bool:
+    """读布尔环境变量。"""
+    return os.getenv(key, default).lower() == "true"
+
+
+def _is_eval_mode() -> bool:
+    """评测模式：关闭所有非必要中间件，最小化 token 和启动开销。
+
+    开启方式：设置 AGENT_EVAL_MODE=true
+    影响：
+      - 关闭 user_memory 注入
+      - 关闭 retrieval 注入
+      - 关闭 thinking_router
+      - 关闭 status_bar 中间件
+      - 关闭 trajectory 持久化
+      - 关闭 MCP（如果未显式打开）
+      - 用精简 system prompt（若存在）
+    """
+    return _env_bool("AGENT_EVAL_MODE", "false")
+
+
+# ============================================================
 # 全局沙箱工厂（进程级单例）
 # ============================================================
 
@@ -158,7 +184,20 @@ def _get_sandbox_pool() -> SandboxPool:
 
 
 def load_system_prompt(agent_home: Path) -> str:
-    """加载系统提示词（从 Agent 自身目录读取）。"""
+    """加载系统提示词。
+
+    优先级：
+    1. AGENT_EVAL_MODE=true 且 prompts/system_minimal.md 存在 → 用精简版
+    2. prompts/system_v1.md（默认）
+
+    评测场景用精简版可以省 2k~3k token/轮。
+    """
+    # 评测模式：优先用精简版
+    if _is_eval_mode():
+        minimal = agent_home / "prompts" / "system_minimal.md"
+        if minimal.exists():
+            return minimal.read_text(encoding="utf-8")
+
     path = agent_home / "prompts" / "system_v1.md"
     if not path.exists():
         raise FileNotFoundError(f"系统提示词文件不存在: {path}")
@@ -166,7 +205,12 @@ def load_system_prompt(agent_home: Path) -> str:
 
 
 def load_project_memory(project_path: Path) -> str:
-    """加载项目记忆（从用户项目里读取，启动时读一次）。"""
+    """加载项目记忆（从用户项目里读取，启动时读一次）。
+
+    评测模式下不加载（评测任务用临时 workspace，没有这些文件）。
+    """
+    if _is_eval_mode():
+        return ""
     for name in ("AGENTS.md", "CLAUDE.md", "CODING_AGENT.md"):
         p = project_path / name
         if p.is_file():
@@ -460,10 +504,14 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     性能优化：
     - 沙箱启动与代码库分析并行
+    - 评测模式（AGENT_EVAL_MODE=true）会跳过 memory / retrieval / status_bar /
+      trajectory / 用户卡片注入，最小化 token 和启动开销
     """
     from observability.logger import get_logger
 
     log = get_logger("core")
+
+    eval_mode = _is_eval_mode()
 
     t0 = time.time()
     cfg.validate()
@@ -473,6 +521,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         provider=cfg.provider_id,
         model=cfg.model,
         project=str(cfg.project_path),
+        eval_mode=eval_mode,
     )
 
     # ---------- 0. LLM + checkpointer（快） ----------
@@ -481,10 +530,12 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     checkpointer = build_checkpointer(cfg.meta_dir)
 
     # Memory store 首次初始化（不加载嵌入模型）
-    try:
-        _ = get_memory_store()
-    except Exception as e:
-        log.warning("memory_store_init_failed", error=str(e))
+    # 评测模式跳过，避免加载嵌入模型（10~30s）
+    if not eval_mode:
+        try:
+            _ = get_memory_store()
+        except Exception as e:
+            log.warning("memory_store_init_failed", error=str(e))
 
     # ---------- 1. 沙箱 + 代码库分析（并行） ----------
     t_parallel = time.time()
@@ -522,8 +573,13 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     status_bar.set_skills([s.name for s in skill_registry.all_skills()])
 
     # ---------- 6. MCP ----------
+    # 评测模式默认关闭 MCP（除非显式开启）
+    enable_mcp = cfg.enable_mcp
+    if eval_mode and not _env_bool("AGENT_FORCE_MCP_IN_EVAL", "false"):
+        enable_mcp = False
+
     mcp_tools: list[Any] = []
-    if cfg.enable_mcp and _MCP_AVAILABLE:
+    if enable_mcp and _MCP_AVAILABLE:
         try:
             mcp_config = build_mcp_config(cfg.agent_home)
             mcp_tools = _load_mcp_in_thread(mcp_config, timeout=15.0)
@@ -592,9 +648,16 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         system_prompt = f"{system_prompt}\n\n## Project Memory\n{project_memory}"
 
     # 第 1 层记忆：用户卡片（全量注入）
-    if os.getenv("AGENT_USER_MEMORY", "true").lower() == "true":
+    # ★ 改动：卡片数从环境变量读，评测模式默认跳过
+    user_memory_enabled = _env_bool("AGENT_USER_MEMORY", "true")
+    if eval_mode:
+        # 评测模式：默认关闭，除非显式打开 AGENT_USER_MEMORY=true
+        user_memory_enabled = _env_bool("AGENT_USER_MEMORY", "false")
+
+    if user_memory_enabled:
         try:
-            cards_text = user_card_repo().render_prompt(max_cards=40)
+            max_cards = int(os.getenv("AGENT_USER_MEMORY_MAX_CARDS", "40"))
+            cards_text = user_card_repo().render_prompt(max_cards=max_cards)
             if cards_text:
                 system_prompt = f"{system_prompt}\n\n## 用户记忆\n{cards_text}"
         except Exception as e:
@@ -612,11 +675,15 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     )
 
     # ---------- 10. 轨迹持久化 ----------
-    trajectory_writer = TrajectoryWriter(
-        session_id=f"session-{id(cfg) & 0xFFFFFF:x}",
-        base_dir=str(cfg.trajectory_dir),
-    )
-    trajectory_mw = TrajectoryMiddleware(trajectory_writer)
+    # 评测模式：不写轨迹文件（省 IO，评测不需要回放）
+    trajectory_writer: TrajectoryWriter | None = None
+    trajectory_mw: TrajectoryMiddleware | None = None
+    if not eval_mode:
+        trajectory_writer = TrajectoryWriter(
+            session_id=f"session-{id(cfg) & 0xFFFFFF:x}",
+            base_dir=str(cfg.trajectory_dir),
+        )
+        trajectory_mw = TrajectoryMiddleware(trajectory_writer)
 
     # ---------- 11. 指标队列 ----------
     metrics_queue: "queue.Queue[dict]" = queue.Queue(maxsize=2000)
@@ -643,25 +710,29 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         )
     )
 
+    # 评测模式下的开关默认值
+    thinking_router_default = "false" if eval_mode else "true"
+    retrieval_default = "false" if eval_mode else "true"
+
     middlewares = [
         # 1. 条件化思考（最先跑，读原始 user 消息）
         create_thinking_router_middleware(
             provider=cfg.provider_id,
-            enabled=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
+            enabled=_env_bool("AGENT_THINKING_ROUTER", thinking_router_default),
             strategy=os.getenv("AGENT_THINKING_STRATEGY", "auto"),
         ),
         # 2. Content 剥离（清除带 tool_calls 的历史 AI content）
         create_content_stripper_middleware(
-            enabled=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
+            enabled=_env_bool("AGENT_CONTENT_STRIPPER", "true"),
         ),
         # 3. 第 2 层记忆：检索注入
         create_retrieval_inject_middleware(
-            enabled=(os.getenv("AGENT_RETRIEVAL", "true").lower() == "true"),
+            enabled=_env_bool("AGENT_RETRIEVAL", retrieval_default),
             top_k=int(os.getenv("AGENT_RETRIEVAL_TOP_K", "3")),
         ),
         # 4. 幂等性保护（写类工具相同参数只执行一次）
         create_idempotency_middleware(
-            enabled=(os.getenv("AGENT_IDEMPOTENCY", "true").lower() == "true"),
+            enabled=_env_bool("AGENT_IDEMPOTENCY", "true"),
         ),
         # 5. 上下文压缩
         ContextCompactionMiddleware(
@@ -669,7 +740,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
             workspace=str(cfg.project_path),
             config=CompactionPipelineConfig(model_window=cfg.model_window),
         ),
-        # 6. 工具过滤（按激活的 skill）
+        # 6. 工具过滤（按激活的 skill + search_tools 结果）
         create_tool_filter_middleware(all_tool_names, skill_tool_map),
         # 7. 指标采集
         MetricsMiddleware(
@@ -682,10 +753,10 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         create_dependency_check_middleware(analyzer),
         # 9. 熔断器
         circuit_breaker,
-        # 10. 状态栏注入
-        StatusBarMiddleware(status_bar),
-        # 11. 轨迹持久化
-        trajectory_mw,
+        # 10. 状态栏注入（评测模式跳过）
+        *([] if eval_mode else [StatusBarMiddleware(status_bar)]),
+        # 11. 轨迹持久化（评测模式跳过）
+        *([] if trajectory_mw is None else [trajectory_mw]),
         # 12. 缓存标记（最后跑，反映最终请求）
         create_prompt_cache_middleware(
             cache_ttl="5m",
@@ -711,11 +782,12 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         tools=len(tools),
         skills=len(skill_registry.all_skills()),
         mcp_tools=len(mcp_tools),
-        thinking_router=(os.getenv("AGENT_THINKING_ROUTER", "true").lower() == "true"),
-        content_stripper=(os.getenv("AGENT_CONTENT_STRIPPER", "true").lower() == "true"),
-        retrieval=(os.getenv("AGENT_RETRIEVAL", "true").lower() == "true"),
-        idempotency=(os.getenv("AGENT_IDEMPOTENCY", "true").lower() == "true"),
-        user_memory=(os.getenv("AGENT_USER_MEMORY", "true").lower() == "true"),
+        eval_mode=eval_mode,
+        thinking_router=_env_bool("AGENT_THINKING_ROUTER", thinking_router_default),
+        content_stripper=_env_bool("AGENT_CONTENT_STRIPPER", "true"),
+        retrieval=_env_bool("AGENT_RETRIEVAL", retrieval_default),
+        idempotency=_env_bool("AGENT_IDEMPOTENCY", "true"),
+        user_memory=user_memory_enabled,
         memory_backend=backend_info.get("backend", "?"),
         memory_type=backend_info.get("type", "?"),
         checkpoint_db=str(cfg.meta_dir / "sessions" / "checkpoints.db"),
