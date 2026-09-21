@@ -7,6 +7,11 @@
       AIMessage"的 content 清空，模型看不到预告，就不会续写。
 
 副作用：没有。清理后的历史对模型来说是"更干净"的上下文。
+
+实现要点（LangChain 1.0 AgentMiddleware）：
+- 用 wrap_model_call / awrap_model_call，不用 modify_model_request
+  （后者不是标准 hook，框架会静默忽略）
+- 用 request.override(messages=...) 生成新 request，不直接赋值
 """
 
 from __future__ import annotations
@@ -20,15 +25,24 @@ class ContentStripperMiddleware(AgentMiddleware):
 
     name: str = "ContentStripperMiddleware"
 
-    def __init__(self, enabled: bool = True):
+    def __init__(self, enabled: bool = True, debug: bool = False):
         super().__init__()
         self.enabled = enabled
+        self.debug = debug
 
-    def modify_model_request(self, request, model):
-        return self._strip(request)
+    # ---------- 同步 ----------
 
-    async def amodify_model_request(self, request, model):
-        return self._strip(request)
+    def wrap_model_call(self, request, handler):
+        request = self._strip(request)
+        return handler(request)
+
+    # ---------- 异步 ----------
+
+    async def awrap_model_call(self, request, handler):
+        request = self._strip(request)
+        return await handler(request)
+
+    # ---------- 内部 ----------
 
     def _strip(self, request):
         if not self.enabled:
@@ -56,11 +70,21 @@ class ContentStripperMiddleware(AgentMiddleware):
             messages[i] = msg.model_copy(update={"content": ""})
             changed = True
 
-        if changed:
-            request.messages = messages
+            if self.debug:
+                print(
+                    f"[stripper] 清空 message[{i}] 的 content "
+                    f"({len(content)} 字符, {len(tool_calls)} 个 tool_calls)"
+                )
 
-        return request
+        if not changed:
+            return request
+
+        # ★ 关键：用 override 生成新 request
+        return request.override(messages=messages)
 
 
-def create_content_stripper_middleware(enabled: bool = True) -> ContentStripperMiddleware:
-    return ContentStripperMiddleware(enabled=enabled)
+def create_content_stripper_middleware(
+    enabled: bool = True,
+    debug: bool = False,
+) -> ContentStripperMiddleware:
+    return ContentStripperMiddleware(enabled=enabled, debug=debug)
