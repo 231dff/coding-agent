@@ -11,13 +11,16 @@ from dataclasses import dataclass
 
 from langchain.agents.middleware import AgentMiddleware
 
-_DEFAULT_CORE_TOOLS = frozenset({
-    "read_file",       # 读文件，最基础
-    "edit_file",       # 改代码，最基础
-    "grep_search",     # 定位代码
-    "glob_files",      # 定位文件
-    "search_tools",    # 发现其他工具
-})
+_DEFAULT_CORE_TOOLS = frozenset(
+    {
+        "read_file",  # 读文件，最基础
+        "edit_file",  # 改代码，最基础
+        "grep_search",  # 定位代码
+        "glob_files",  # 定位文件
+        "search_tools",  # 发现其他工具
+    }
+)
+
 
 @dataclass
 class ToolFilterConfig:

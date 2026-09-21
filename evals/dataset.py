@@ -60,24 +60,48 @@ def load_tasks(directory: str | Path) -> list[EvalTask]:
 # 允许断言使用的内置函数白名单（安全 + 够用）
 _SAFE_BUILTINS = {
     # 类型
-    "bool": bool, "int": int, "float": float, "str": str,
-    "list": list, "dict": dict, "set": set, "tuple": tuple,
+    "bool": bool,
+    "int": int,
+    "float": float,
+    "str": str,
+    "list": list,
+    "dict": dict,
+    "set": set,
+    "tuple": tuple,
     # 聚合
-    "all": all, "any": any, "len": len, "min": min, "max": max,
-    "sum": sum, "sorted": sorted, "reversed": reversed,
-    "enumerate": enumerate, "zip": zip, "range": range, "map": map,
+    "all": all,
+    "any": any,
+    "len": len,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "sorted": sorted,
+    "reversed": reversed,
+    "enumerate": enumerate,
+    "zip": zip,
+    "range": range,
+    "map": map,
     "filter": filter,
     # 对象
-    "isinstance": isinstance, "hasattr": hasattr, "getattr": getattr,
-    "repr": repr, "type": type,
+    "isinstance": isinstance,
+    "hasattr": hasattr,
+    "getattr": getattr,
+    "repr": repr,
+    "type": type,
     # 数学
-    "abs": abs, "round": round, "pow": pow,
+    "abs": abs,
+    "round": round,
+    "pow": pow,
     # 调试
     "print": print,
     # 异常
-    "Exception": Exception, "ValueError": ValueError, "TypeError": TypeError,
+    "Exception": Exception,
+    "ValueError": ValueError,
+    "TypeError": TypeError,
     # 常用
-    "True": True, "False": False, "None": None,
+    "True": True,
+    "False": False,
+    "None": None,
 }
 
 
@@ -90,10 +114,7 @@ def _wrap_result(result, expr: str) -> tuple[bool, str]:
     """把 eval 的结果包装成 (bool, error_msg)。"""
     if result:
         return True, ""
-    return False, (
-        f"❌ 断言结果为 False（Agent 输出不符合预期）\n"
-        f"  断言:\n{_indent(expr, 2)}"
-    )
+    return False, (f"❌ 断言结果为 False（Agent 输出不符合预期）\n  断言:\n{_indent(expr, 2)}")
 
 
 def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
@@ -177,11 +198,7 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
             code_expr = compile(expr, "<assert>", "eval")
             result = eval(code_expr, namespace)  # noqa: S307  ← 只传 globals
         except SyntaxError as e:
-            return False, (
-                f"❌ 断言语法错误\n"
-                f"  错误: {e}\n"
-                f"  代码:\n{_indent(assert_expr, 2)}"
-            )
+            return False, (f"❌ 断言语法错误\n  错误: {e}\n  代码:\n{_indent(assert_expr, 2)}")
         except NameError as e:
             return False, (
                 f"❌ 断言里用了不在白名单里的名字\n"
@@ -190,8 +207,7 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
             )
         except Exception as e:
             return False, (
-                f"❌ 断言执行失败: {type(e).__name__}: {e}\n"
-                f"  代码:\n{_indent(assert_expr, 2)}"
+                f"❌ 断言执行失败: {type(e).__name__}: {e}\n  代码:\n{_indent(assert_expr, 2)}"
             )
         return _wrap_result(result, assert_expr)
 
@@ -202,8 +218,7 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
         exec(code_last, namespace)  # noqa: S102
     except Exception as e:
         return False, (
-            f"❌ 断言最后一行执行异常: {type(e).__name__}: {e}\n"
-            f"  代码:\n{_indent(assert_expr, 2)}"
+            f"❌ 断言最后一行执行异常: {type(e).__name__}: {e}\n  代码:\n{_indent(assert_expr, 2)}"
         )
 
     # 约定：如果没有返回表达式，检查 _result 变量
