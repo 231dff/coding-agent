@@ -3,22 +3,27 @@
     "task_id": "fix_off_by_one",
     "category": "bug_fix",
     "passed": true,
-    "duration_s": 43.75,
+    "duration_s": 64.86,
     "tool_calls": [
       "read_file",
-      "search_tools",
-      "search_tools",
-      "edit_file",
-      "run_tests",
-      "run_tests",
-      "run_tests",
       "read_file",
+      "edit_file",
+      "search_tools",
       "search_tools",
       "run_tests",
-      "run_tests"
+      "search_tools",
+      "search_tools",
+      "search_tools",
+      "search_tools",
+      "search_tools",
+      "search_tools",
+      "execute",
+      "execute",
+      "execute",
+      "execute"
     ],
-    "input_tokens": 52815,
-    "output_tokens": 1407,
+    "input_tokens": 75026,
+    "output_tokens": 2013,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
@@ -27,15 +32,15 @@
     "task_id": "fix_import_cycle",
     "category": "bug_fix",
     "passed": true,
-    "duration_s": 20.5,
+    "duration_s": 15.09,
     "tool_calls": [
       "read_file",
       "read_file",
       "edit_file",
-      "grep_search"
+      "execute"
     ],
-    "input_tokens": 18764,
-    "output_tokens": 970,
+    "input_tokens": 18713,
+    "output_tokens": 475,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
@@ -44,14 +49,14 @@
     "task_id": "upgrade_api_usage",
     "category": "dep_upgrade",
     "passed": true,
-    "duration_s": 13.16,
+    "duration_s": 13.4,
     "tool_calls": [
       "grep_search",
       "read_file",
       "edit_file"
     ],
-    "input_tokens": 18359,
-    "output_tokens": 380,
+    "input_tokens": 18326,
+    "output_tokens": 348,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
@@ -60,18 +65,18 @@
     "task_id": "rename_across_files",
     "category": "multi_file",
     "passed": true,
-    "duration_s": 16.63,
+    "duration_s": 18.46,
     "tool_calls": [
       "glob_files",
       "grep_search",
       "read_file",
+      "grep_search",
       "read_file",
       "edit_file",
-      "edit_file",
-      "grep_search"
+      "edit_file"
     ],
-    "input_tokens": 24144,
-    "output_tokens": 696,
+    "input_tokens": 24012,
+    "output_tokens": 885,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
@@ -80,7 +85,7 @@
     "task_id": "add_param_with_callers",
     "category": "multi_file",
     "passed": true,
-    "duration_s": 24.09,
+    "duration_s": 21.32,
     "tool_calls": [
       "glob_files",
       "glob_files",
@@ -89,12 +94,11 @@
       "grep_search",
       "edit_file",
       "edit_file",
-      "edit_file",
       "read_file",
       "read_file"
     ],
-    "input_tokens": 34366,
-    "output_tokens": 1259,
+    "input_tokens": 29344,
+    "output_tokens": 1002,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
@@ -103,13 +107,13 @@
     "task_id": "fix_add_bug",
     "category": "single_file",
     "passed": true,
-    "duration_s": 11.67,
+    "duration_s": 11.42,
     "tool_calls": [
       "read_file",
       "edit_file"
     ],
     "input_tokens": 13579,
-    "output_tokens": 304,
+    "output_tokens": 248,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
@@ -118,14 +122,13 @@
     "task_id": "add_docstring",
     "category": "single_file",
     "passed": true,
-    "duration_s": 11.29,
+    "duration_s": 11.32,
     "tool_calls": [
-      "glob_files",
       "read_file",
       "edit_file"
     ],
-    "input_tokens": 18211,
-    "output_tokens": 247,
+    "input_tokens": 13610,
+    "output_tokens": 281,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
@@ -134,17 +137,14 @@
     "task_id": "rename_function",
     "category": "single_file",
     "passed": true,
-    "duration_s": 17.39,
+    "duration_s": 13.58,
     "tool_calls": [
-      "glob_files",
-      "grep_search",
       "read_file",
       "edit_file",
-      "grep_search",
       "grep_search"
     ],
-    "input_tokens": 32744,
-    "output_tokens": 517,
+    "input_tokens": 18291,
+    "output_tokens": 313,
     "cache_hit_rate": 0.0,
     "error": null,
     "assert_error": null
