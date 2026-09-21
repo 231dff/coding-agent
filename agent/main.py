@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import sys
 import threading
@@ -124,6 +125,7 @@ def print_help() -> None:
             "  /config       显示当前配置\n"
             "  /metrics      显示本次会话指标\n"
             "  /trace        查看最近的调用指标\n"
+            "  /thinking     查看最近一次任务的思考过程\n"  # ★ 新增
             "  /cards        查看用户卡片（第 1 层记忆）\n"
             "  /recall <q>   检索历史会话（第 2 层记忆）\n"
             "  /memory       查看记忆后端状态\n"
@@ -187,6 +189,84 @@ def show_metrics(rt) -> None:
 
 def show_trace(display: MetricsDisplay) -> None:
     display.dump_recent(30)
+
+
+# ============================================================
+# 思考过程查询（新增）
+# ============================================================
+
+
+def _thinking_path(rt, thread_id: str) -> Path:
+    """思考轨迹 JSONL 路径。"""
+    d = rt.config.trajectory_dir
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{thread_id}_thinking.jsonl"
+
+
+def _save_thinking_trace(rt, thread_id: str, turns: list[dict]) -> None:
+    """把每轮思考追加到 JSONL。"""
+    path = _thinking_path(rt, thread_id)
+    with open(path, "a", encoding="utf-8") as f:
+        for turn in turns:
+            f.write(json.dumps(turn, ensure_ascii=False) + "\n")
+
+
+def show_thinking(rt, thread_id: str) -> None:
+    """显示最近一次任务的思考过程。"""
+    path = _thinking_path(rt, thread_id)
+    if not path.exists():
+        console.print("[dim]暂无思考记录[/dim]")
+        return
+
+    lines = path.read_text(encoding="utf-8").strip().split("\n")
+    if not lines:
+        console.print("[dim]暂无思考记录[/dim]")
+        return
+
+    # 按 round==1 切分段落，取最后一段
+    segments: list[list[dict]] = []
+    current: list[dict] = []
+    for line in lines:
+        try:
+            turn = json.loads(line)
+        except Exception:
+            continue
+        if turn.get("round") == 1 and current:
+            segments.append(current)
+            current = []
+        current.append(turn)
+    if current:
+        segments.append(current)
+
+    if not segments:
+        console.print("[dim]暂无思考记录[/dim]")
+        return
+
+    latest = segments[-1]
+
+    parts: list[str] = []
+    for turn in latest:
+        r = turn.get("round", "?")
+        content = turn.get("content", "")
+        tools = turn.get("tool_calls", [])
+        reasoning = turn.get("reasoning", "")
+
+        parts.append(f"[bold cyan]## 第 {r} 轮[/bold cyan]")
+        if tools:
+            parts.append(f"[dim]工具: {', '.join(tools)}[/dim]")
+        if reasoning:
+            parts.append(f"[dim italic]{reasoning}[/dim italic]")
+        if content:
+            parts.append(content)
+        parts.append("")
+
+    console.print(
+        Panel(
+            "\n".join(parts),
+            title=f"思考过程（{len(latest)} 轮）",
+            border_style="dim",
+        )
+    )
 
 
 # ============================================================
@@ -549,14 +629,11 @@ def _extract_content(chunk) -> str:
     return ""
 
 
-def _has_tool_call_signal(msg) -> bool:
-    tcc = getattr(msg, "tool_call_chunks", None)
-    if tcc:
-        return True
-    tc = getattr(msg, "tool_calls", None)
-    if tc:
-        return True
-    return False
+def _extract_tool_name(tc) -> str:
+    """从一个 tool_call / tool_call_chunk 里提取工具名。"""
+    if isinstance(tc, dict):
+        return tc.get("name") or ""
+    return getattr(tc, "name", "") or ""
 
 
 def _dedup_repeats(text: str) -> str:
@@ -577,52 +654,75 @@ def _dedup_repeats(text: str) -> str:
 
 
 # ============================================================
-# 流式任务执行
+# 流式任务执行（★ 核心改动）
 # ============================================================
 
 
 def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
-    reasoning_buf: list[str] = []
-    content_buf: list[str] = []
-    pending_content: list[str] = []
-    round_has_tool_call = [False]
-    tool_seen: set[str] = set()
-    tool_events: list[str] = []
+    """流式执行任务，把每一轮的 content / reasoning / tool_calls 单独记录。
 
-    REASONING_DISPLAY_MAX = 1200
-    TOOL_DISPLAY_MAX = 6
+    设计：
+    - 每一轮 LLM 输出（可能带工具调用）单独存进 `turns`
+    - 实时显示**只展示当前轮次**的思考，不拼接历史
+    - 结束后把全部轮次写 JSONL（`/thinking` 可查询）
+    - 返回值是**最后一轮非空的 content**（最终答案）
+
+    Returns:
+        最终答案文本（可能为空字符串）。
+    """
+    turns: list[dict] = []
+    cur_content: list[str] = []
+    cur_reasoning: list[str] = []
+    cur_tool_calls: list[str] = []
+
+    # 实时显示缓冲（仅当前轮次）
+    reasoning_display: list[str] = []
+    tool_events: list[str] = []
+    tool_seen: set[str] = set()
     _last_update = [0.0]
 
-    def flush_round():
-        if not round_has_tool_call[0] and pending_content:
-            content_buf.extend(pending_content)
-        pending_content.clear()
-        round_has_tool_call[0] = False
+    REASONING_DISPLAY_MAX = 800
+    TOOL_DISPLAY_MAX = 6
 
-    def current_display_text() -> str:
-        parts = []
-        if content_buf:
-            parts.append("".join(content_buf))
-        if not round_has_tool_call[0] and pending_content:
-            parts.append("".join(pending_content))
-        return "".join(parts)
+    def seal_round() -> None:
+        """结束当前轮次，存进 turns，重置缓冲区。"""
+        nonlocal cur_content, cur_reasoning, cur_tool_calls
+        if cur_content or cur_reasoning or cur_tool_calls:
+            turns.append(
+                {
+                    "round": len(turns) + 1,
+                    "content": "".join(cur_content),
+                    "reasoning": "".join(cur_reasoning),
+                    "tool_calls": list(cur_tool_calls),
+                }
+            )
+        cur_content = []
+        cur_reasoning = []
+        cur_tool_calls = []
 
     def build_display() -> Text:
         t = Text()
-        if reasoning_buf:
-            full = "".join(reasoning_buf)
-            if len(full) > REASONING_DISPLAY_MAX:
-                full = "… " + full[-REASONING_DISPLAY_MAX:]
-            t.append("💭 思考中…\n", style="dim italic")
-            t.append(full, style="dim")
-            t.append("\n\n")
+
+        # 工具事件（历史，跨轮次）
         if tool_events:
             for line in tool_events[-TOOL_DISPLAY_MAX:]:
                 t.append(line + "\n", style="cyan")
             t.append("\n")
-        text = current_display_text()
-        if text:
-            t.append(text)
+
+        # 当前轮次的 reasoning
+        reasoning = "".join(reasoning_display)
+        if reasoning:
+            if len(reasoning) > REASONING_DISPLAY_MAX:
+                reasoning = "… " + reasoning[-REASONING_DISPLAY_MAX:]
+            t.append("💭 思考中…\n", style="dim italic")
+            t.append(reasoning, style="dim")
+            t.append("\n\n")
+
+        # 当前轮次的 content（只显示本轮的，不拼历史）
+        cur = "".join(cur_content)
+        if cur:
+            t.append(cur)
+
         return t
 
     live = Live(
@@ -647,35 +747,59 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
                 continue
 
             if isinstance(msg, AIMessageChunk):
-                if _has_tool_call_signal(msg):
-                    round_has_tool_call[0] = True
+                # 收集工具调用信号（tool_call_chunks 是流式的，可能分片到达）
+                tcc = getattr(msg, "tool_call_chunks", None) or []
+                for tc in tcc:
+                    name = _extract_tool_name(tc)
+                    if name and name not in cur_tool_calls:
+                        cur_tool_calls.append(name)
+
+                # 兜底：有些 provider 直接给 tool_calls
+                tc_full = getattr(msg, "tool_calls", None) or []
+                for tc in tc_full:
+                    name = _extract_tool_name(tc)
+                    if name and name not in cur_tool_calls:
+                        cur_tool_calls.append(name)
 
                 c = _extract_content(msg)
                 if c:
-                    pending_content.append(c)
+                    cur_content.append(c)
 
                 r = _extract_reasoning(msg)
                 if r:
-                    reasoning_buf.append(r)
+                    cur_reasoning.append(r)
+                    reasoning_display.append(r)
 
             elif isinstance(msg, ToolMessage):
-                flush_round()
-
+                # 工具返回 → 结束当前轮次
                 name = getattr(msg, "name", "tool") or "tool"
                 if name not in tool_seen:
                     tool_seen.add(name)
                     tool_events.append(f"  ⚙ {name} ✓")
+
+                seal_round()
+                reasoning_display.clear()
 
             now = time.time()
             if now - _last_update[0] > 0.25:
                 live.update(build_display())
                 _last_update[0] = now
 
-        flush_round()
+        # 流结束：把最后一轮收进去
+        seal_round()
         live.update(build_display())
 
-    raw = "".join(content_buf)
-    return _dedup_repeats(raw)
+    # ---------- 持久化全部轮次 ----------
+    try:
+        _save_thinking_trace(rt, thread_id, turns)
+    except Exception as e:
+        log.warning("save_thinking_trace_failed", error=str(e))
+
+    # ---------- 返回最终答案 ----------
+    for turn in reversed(turns):
+        if turn["content"]:
+            return _dedup_repeats(turn["content"])
+    return ""
 
 
 # ============================================================
@@ -683,13 +807,45 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
 # ============================================================
 
 
+def _print_final(content: str, rt, thread_id: str, turns_count: int) -> None:
+    """统一打印最终答案 + 思考过程提示。"""
+    console.print()
+    if content:
+        console.print(Panel(Markdown(content), title="回复", border_style="cyan"))
+    else:
+        console.print(Panel("[dim](模型无文本输出，可能是工具调用已完成)[/dim]", border_style="cyan"))
+
+    if turns_count > 1:
+        console.print(
+            f"[dim]💭 思考过程: {turns_count} 轮 · 输入 [bold]/thinking[/bold] 查看[/dim]"
+        )
+
+
 def run_single_task(rt, task: str, thread_id: str, display: MetricsDisplay) -> None:
     console.print(f"[bold green]任务:[/bold green] {task}\n")
     try:
         content = stream_task_with_reasoning(rt, task, thread_id)
         display.flush()
-        console.print()
-        console.print(Panel(Markdown(content), title="回复", border_style="cyan"))
+
+        # 从 thinking JSONL 里数一下轮数
+        turns_count = 0
+        try:
+            path = _thinking_path(rt, thread_id)
+            if path.exists():
+                lines = path.read_text(encoding="utf-8").strip().split("\n")
+                # 只数最后一段（round 从 1 重新开始的）
+                for line in reversed(lines):
+                    try:
+                        turn = json.loads(line)
+                    except Exception:
+                        continue
+                    if turn.get("round") == 1 and turns_count > 0:
+                        break
+                    turns_count += 1
+        except Exception:
+            pass
+
+        _print_final(content, rt, thread_id, turns_count)
     except KeyboardInterrupt:
         console.print("\n[yellow]已中断[/yellow]")
     except Exception as e:
@@ -764,6 +920,9 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         if lower_input == "/trace":
             show_trace(display)
             continue
+        if lower_input == "/thinking":            # ★ 新增
+            show_thinking(rt, thread_id)
+            continue
         if lower_input == "/cards":
             show_cards()
             continue
@@ -802,9 +961,25 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
             console.print()
             content = stream_task_with_reasoning(rt, task_text, thread_id)
             display.flush()
-            console.print()
-            console.print(Panel(Markdown(content), border_style="cyan"))
-            console.print()
+
+            # 数轮数
+            turns_count = 0
+            try:
+                path = _thinking_path(rt, thread_id)
+                if path.exists():
+                    lines = path.read_text(encoding="utf-8").strip().split("\n")
+                    for line in reversed(lines):
+                        try:
+                            turn = json.loads(line)
+                        except Exception:
+                            continue
+                        if turn.get("round") == 1 and turns_count > 0:
+                            break
+                        turns_count += 1
+            except Exception:
+                pass
+
+            _print_final(content, rt, thread_id, turns_count)
         except KeyboardInterrupt:
             console.print("\n[yellow]已中断[/yellow]")
         except Exception as e:

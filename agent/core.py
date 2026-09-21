@@ -18,6 +18,12 @@
 - 幂等性中间件防止重复写操作
 - 日志脱敏（见 observability/redact.py）
 - 沙箱 release 不做任何删除（见 sandbox/pool.py）
+
+沙箱网络策略（★ 本次改动）：
+- 默认断网（network=False），防止 Agent 外传代码 / 下载恶意依赖
+- 通过环境变量 AGENT_SANDBOX_NETWORK=true 临时开网
+- 通过环境变量 AGENT_SANDBOX_MEMORY / AGENT_SANDBOX_CPU 调整资源
+- 通过环境变量 AGENT_SANDBOX_IMAGE 指定自定义镜像（预装 numpy / matplotlib 等）
 """
 
 from __future__ import annotations
@@ -131,7 +137,7 @@ except ImportError as _e:
 
 
 # ============================================================
-# 环境变量开关（评测/精简模式用）
+# 环境变量开关（评测 / 沙箱 / 精简模式用）
 # ============================================================
 
 
@@ -140,12 +146,60 @@ def _env_bool(key: str, default: str = "true") -> bool:
     return os.getenv(key, default).lower() == "true"
 
 
+def _env_int(key: str, default: int) -> int:
+    """读整型环境变量。"""
+    try:
+        return int(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(key: str, default: float) -> float:
+    """读浮点环境变量。"""
+    try:
+        return float(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 def _is_eval_mode() -> bool:
     """评测模式：关闭所有非必要中间件，最小化 token 和启动开销。
 
     开启方式：设置 AGENT_EVAL_MODE=true
     """
     return _env_bool("AGENT_EVAL_MODE", "false")
+
+
+# ============================================================
+# 沙箱配置（★ 本次新增）
+# ============================================================
+
+
+@dataclass
+class SandboxSettings:
+    """沙箱运行时配置。"""
+
+    network: bool = False
+    memory_limit: str = "2g"
+    cpu_limit: float = 2.0
+    image: str | None = None
+
+    @classmethod
+    def from_env(cls) -> "SandboxSettings":
+        """从环境变量读取配置。
+
+        环境变量：
+        - AGENT_SANDBOX_NETWORK: "true" / "false"（默认 false，安全）
+        - AGENT_SANDBOX_MEMORY:  内存上限，如 "4g"（默认 "2g"）
+        - AGENT_SANDBOX_CPU:     CPU 核数上限，如 "4"（默认 "2.0"）
+        - AGENT_SANDBOX_IMAGE:   自定义镜像名（默认用 sandbox 内置默认）
+        """
+        return cls(
+            network=_env_bool("AGENT_SANDBOX_NETWORK", "false"),
+            memory_limit=os.getenv("AGENT_SANDBOX_MEMORY", "2g"),
+            cpu_limit=_env_float("AGENT_SANDBOX_CPU", 2.0),
+            image=os.getenv("AGENT_SANDBOX_IMAGE") or None,
+        )
 
 
 # ============================================================
@@ -431,9 +485,47 @@ class AgentRuntime:
 # ============================================================
 
 
+def _build_sandbox_kwargs(settings: SandboxSettings) -> dict:
+    """把 SandboxSettings 转成 DockerSandbox 的构造参数。
+
+    有些 DockerSandbox 版本不一定支持 image 参数，做兼容处理：
+    只有在 settings.image 非空时才传。
+    """
+    kwargs: dict[str, Any] = {
+        "memory_limit": settings.memory_limit,
+        "cpu_limit": settings.cpu_limit,
+        "network": settings.network,
+    }
+    if settings.image:
+        kwargs["image"] = settings.image
+    return kwargs
+
+
 def _start_sandbox(cfg: AgentConfig, log) -> tuple[DockerSandbox, bool]:
-    """启动沙箱。返回 (sandbox, from_pool)。"""
+    """启动沙箱。返回 (sandbox, from_pool)。
+
+    ★ 本次改动：
+    - 网络、内存、CPU、镜像都从环境变量读（SandboxSettings）
+    - 默认 network=False（安全）
+    - 设置 AGENT_SANDBOX_NETWORK=true 可临时开网（信任场景）
+    """
+    settings = SandboxSettings.from_env()
     from_pool = False
+
+    log.info(
+        "sandbox_start",
+        network=settings.network,
+        memory=settings.memory_limit,
+        cpu=settings.cpu_limit,
+        image=settings.image or "(default)",
+    )
+
+    if settings.network:
+        print(
+            "[core] ⚠️  沙箱网络已开启（AGENT_SANDBOX_NETWORK=true）。"
+            "Agent 可以访问外网，仅在信任的场景使用。"
+        )
+
     try:
         sb = _get_sandbox_pool().acquire(str(cfg.project_path))
         from_pool = True
@@ -442,9 +534,7 @@ def _start_sandbox(cfg: AgentConfig, log) -> tuple[DockerSandbox, bool]:
         log.warning("sandbox_factory_acquire_failed", error=str(e))
         sb = DockerSandbox(
             str(cfg.project_path),
-            memory_limit="2g",
-            cpu_limit=2.0,
-            network=False,
+            **_build_sandbox_kwargs(settings),
         )
         sb.start()
         return sb, from_pool
@@ -478,6 +568,9 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     - 沙箱启动与代码库分析并行
     - 评测模式（AGENT_EVAL_MODE=true）会跳过 memory / retrieval / status_bar /
       trajectory / 用户卡片注入，最小化 token 和启动开销
+
+    沙箱：
+    - 网络 / 内存 / CPU / 镜像 通过环境变量控制（见 SandboxSettings）
     """
     from observability.logger import get_logger
 
@@ -624,7 +717,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     if user_memory_enabled:
         try:
-            max_cards = int(os.getenv("AGENT_USER_MEMORY_MAX_CARDS", "40"))
+            max_cards = _env_int("AGENT_USER_MEMORY_MAX_CARDS", 40)
             cards_text = user_card_repo().render_prompt(max_cards=max_cards)
             if cards_text:
                 system_prompt = f"{system_prompt}\n\n## 用户记忆\n{cards_text}"
@@ -672,11 +765,11 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     # ★ 熔断器：只读工具阈值 20，写工具阈值 5，未知工具阈值 8
     circuit_breaker = CircuitBreakerMiddleware(
         CircuitBreakerConfig(
-            read_only_max_repeats=int(os.getenv("AGENT_CB_READ_REPEATS", "20")),
-            write_max_repeats=int(os.getenv("AGENT_CB_WRITE_REPEATS", "5")),
-            default_max_repeats=int(os.getenv("AGENT_CB_DEFAULT_REPEATS", "8")),
-            max_consecutive_failures=int(os.getenv("AGENT_CB_MAX_FAILURES", "3")),
-            max_retries_for_retryable=int(os.getenv("AGENT_CB_MAX_RETRIES", "5")),
+            read_only_max_repeats=_env_int("AGENT_CB_READ_REPEATS", 20),
+            write_max_repeats=_env_int("AGENT_CB_WRITE_REPEATS", 5),
+            default_max_repeats=_env_int("AGENT_CB_DEFAULT_REPEATS", 8),
+            max_consecutive_failures=_env_int("AGENT_CB_MAX_FAILURES", 3),
+            max_retries_for_retryable=_env_int("AGENT_CB_MAX_RETRIES", 5),
         )
     )
 
@@ -698,7 +791,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         # 3. 第 2 层记忆：检索注入
         create_retrieval_inject_middleware(
             enabled=_env_bool("AGENT_RETRIEVAL", retrieval_default),
-            top_k=int(os.getenv("AGENT_RETRIEVAL_TOP_K", "3")),
+            top_k=_env_int("AGENT_RETRIEVAL_TOP_K", 3),
         ),
         # 4. 幂等性保护
         create_idempotency_middleware(
@@ -721,7 +814,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         ),
         # 8. 依赖检查
         create_dependency_check_middleware(analyzer),
-        # 9. 熔断器（新阈值策略）
+        # 9. 熔断器
         circuit_breaker,
         # 10. 状态栏注入（评测模式跳过）
         *([] if eval_mode else [StatusBarMiddleware(status_bar)]),
@@ -746,6 +839,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     # ---------- 14. 日志 ----------
     backend_info = store_backend_info()
+    sandbox_settings = SandboxSettings.from_env()
 
     log.info(
         "agent_build_done",
@@ -760,6 +854,8 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         user_memory=user_memory_enabled,
         memory_backend=backend_info.get("backend", "?"),
         memory_type=backend_info.get("type", "?"),
+        sandbox_network=sandbox_settings.network,
+        sandbox_memory=sandbox_settings.memory_limit,
         checkpoint_db=str(cfg.meta_dir / "sessions" / "checkpoints.db"),
         elapsed_s=round(time.time() - t0, 2),
     )
