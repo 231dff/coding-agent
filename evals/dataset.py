@@ -57,6 +57,76 @@ def load_tasks(directory: str | Path) -> list[EvalTask]:
     return tasks
 
 
+# ============================================================
+# 跨平台 UTF-8 路径包装
+# ============================================================
+
+
+class _Utf8Path:
+    """Path 包装器：read_text / write_text 默认 UTF-8。
+
+    避免 Windows 中文系统默认 GBK 解码 UTF-8 文件导致的
+    UnicodeDecodeError。所有其他方法透明代理到真实 Path。
+    """
+
+    def __init__(self, p: Path):
+        self._p = p
+
+    # ---------- 覆盖：强制 UTF-8 ----------
+
+    def read_text(self, encoding: str | None = None, errors: str | None = None) -> str:
+        return self._p.read_text(
+            encoding=encoding or "utf-8",
+            errors=errors or "replace",
+        )
+
+    def write_text(
+        self,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> int:
+        return self._p.write_text(
+            data,
+            encoding=encoding or "utf-8",
+            errors=errors or "replace",
+        )
+
+    # ---------- 路径运算：继续返回包装类型 ----------
+
+    def __truediv__(self, other) -> "_Utf8Path":
+        return _Utf8Path(self._p / other)
+
+    def __rtruediv__(self, other) -> "_Utf8Path":
+        return _Utf8Path(other / self._p)
+
+    def __fspath__(self) -> str:
+        return str(self._p)
+
+    def __str__(self) -> str:
+        return str(self._p)
+
+    def __repr__(self) -> str:
+        return f"_Utf8Path({self._p!r})"
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, _Utf8Path):
+            return self._p == other._p
+        return self._p == other
+
+    def __hash__(self) -> int:
+        return hash(self._p)
+
+    # ---------- 其他属性：透明代理 ----------
+
+    def __getattr__(self, name):
+        return getattr(self._p, name)
+
+
+# ============================================================
+# 断言执行
+# ============================================================
+
 # 允许断言使用的内置函数白名单（安全 + 够用）
 _SAFE_BUILTINS = {
     # 类型
@@ -134,24 +204,23 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
     3) 多行代码块，最后一行是表达式：
         success_assert: |
           _content = (ws / "calc.py").read_text()
-          "range(len(xs) - 1)" not in _content and "range(len(xs))" in _content
+          "range(len(xs) - 1)" not in _content
 
     实现要点：
+    - ws 用 _Utf8Path 包装，read_text 默认 UTF-8（兼容 Windows GBK）
     - 用 AST 区分语句和最后的表达式
-    - ★ globals 和 locals 用同一个 dict，避免生成器表达式 / 推导式
-      在分离的 locals 里查不到名字（Python 已知坑）
+    - globals / locals 用同一个 dict，避免生成器表达式里查不到名字
     """
     if not assert_expr or not assert_expr.strip():
         return False, "❌ success_assert 为空"
 
-    # ★ 关键：ws 和 __builtins__ 都放进 globals，
-    #   并用同一个 dict 作为 globals / locals
+    # ★ ws 用 UTF-8 包装
     namespace: dict = {
         "__builtins__": _SAFE_BUILTINS,
-        "ws": workspace,
+        "ws": _Utf8Path(workspace),
     }
 
-    # ---------- 用 AST 解析，区分语句和最后的表达式 ----------
+    # ---------- 用 AST 解析 ----------
     try:
         tree = ast.parse(assert_expr)
     except SyntaxError as e:
@@ -171,7 +240,7 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
         module = ast.Module(body=body_stmts, type_ignores=[])
         try:
             code_body = compile(module, "<assert>", "exec")
-            exec(code_body, namespace)  # noqa: S102  ← locals 省略 = 用 globals
+            exec(code_body, namespace)  # noqa: S102
         except SyntaxError as e:
             return False, (
                 f"❌ 断言代码块语法错误（前 {len(body_stmts)} 行）\n"
@@ -192,11 +261,10 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
 
     # 2. 处理最后一条语句
     if isinstance(last_stmt, ast.Expr):
-        # 最后一行是表达式 → eval 它，值作为断言结果
         expr = ast.Expression(body=last_stmt.value)
         try:
             code_expr = compile(expr, "<assert>", "eval")
-            result = eval(code_expr, namespace)  # noqa: S307  ← 只传 globals
+            result = eval(code_expr, namespace)  # noqa: S307
         except SyntaxError as e:
             return False, (f"❌ 断言语法错误\n  错误: {e}\n  代码:\n{_indent(assert_expr, 2)}")
         except NameError as e:
@@ -205,13 +273,19 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
                 f"  错误: {e}\n"
                 f"  提示: 只允许用 ws、len/all/any/str/int 等常用函数"
             )
+        except UnicodeDecodeError as e:
+            return False, (
+                f"❌ 断言读取文件时编码错误（应该已经用 UTF-8，检查文件本身编码）\n"
+                f"  错误: {e}\n"
+                f"  代码:\n{_indent(assert_expr, 2)}"
+            )
         except Exception as e:
             return False, (
                 f"❌ 断言执行失败: {type(e).__name__}: {e}\n  代码:\n{_indent(assert_expr, 2)}"
             )
         return _wrap_result(result, assert_expr)
 
-    # 3. 最后一行也是语句（比如 `_result = ...`）→ 检查 _result 变量
+    # 3. 最后一行也是语句 → 检查 _result 变量
     try:
         module = ast.Module(body=[last_stmt], type_ignores=[])
         code_last = compile(module, "<assert>", "exec")
@@ -221,7 +295,6 @@ def run_assert(assert_expr: str, workspace: Path) -> tuple[bool, str]:
             f"❌ 断言最后一行执行异常: {type(e).__name__}: {e}\n  代码:\n{_indent(assert_expr, 2)}"
         )
 
-    # 约定：如果没有返回表达式，检查 _result 变量
     result = namespace.get("_result", False)
     if result:
         return True, ""
