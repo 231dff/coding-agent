@@ -119,7 +119,7 @@ jobs:
       - name: Run evals
         run: |
           python -m evals \
-            --model qwen:qwen3.7-flash \
+            --model qwen:deepseek-v4.1-flash \
             --baseline evals/baseline.json \
             --max-workers 1 \
             --output docs/eval_report.md \
