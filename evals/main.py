@@ -13,7 +13,13 @@ import sys
 from pathlib import Path
 
 from evals.dataset import load_tasks
-from evals.report import generate_markdown_report, load_results, save_results
+from evals.report import (
+    export_csv,
+    generate_markdown_report,
+    load_results,
+    save_results,
+    write_github_step_summary,
+)
 from evals.runner import run_suite
 
 
@@ -26,6 +32,7 @@ def main() -> int:
     parser.add_argument("--baseline", default="", help="基线 JSON 路径")
     parser.add_argument("--output", default="docs/eval_report.md")
     parser.add_argument("--results-json", default="evals/latest_results.json")
+    parser.add_argument("--csv", default="evals/results.csv")
     parser.add_argument("--filter-category", default="")
     args = parser.parse_args()
 
@@ -60,19 +67,21 @@ def main() -> int:
         baseline = load_results(args.baseline)
 
     # 生成报告
-    report = generate_markdown_report(results, baseline, args.output)
+    report = generate_markdown_report(results, baseline, args.output, model=args.model)
     print("\n" + "=" * 60)
     print(report[:2000])
     print("=" * 60)
     print(f"\n报告已写入: {args.output}")
 
     save_results(results, args.results_json)
+    export_csv(results, args.csv)
+    write_github_step_summary(report)
 
     # 回归门禁
     if baseline:
         from evals.scorer import compare_baselines
 
-        passed, _ = compare_baselines(results, baseline)
+        passed, _ = compare_baselines(results, baseline, model=args.model)
         return 0 if passed else 2
 
     return 0

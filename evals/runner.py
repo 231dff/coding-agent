@@ -6,7 +6,7 @@
 3. 启动 Agent
 4. 执行任务描述
 5. 检查成功断言
-6. 收集指标
+6. 收集指标（Token / 成本 / 工具调用 / 耗时）
 """
 
 from __future__ import annotations
@@ -54,9 +54,35 @@ class TaskResult:
         }
 
 
+def _extract_usage_from_messages(messages: list) -> tuple[int, int]:
+    """从 LangChain 的 AIMessage 里提取 token 用量。
+
+    不同 provider 的 usage 字段名不一样，这里做兼容读取：
+    - OpenAI / Qwen（兼容模式）：msg.usage_metadata = {input_tokens, output_tokens}
+    - 部分旧版本：msg.response_metadata["token_usage"] = {prompt_tokens, completion_tokens}
+    """
+    input_tokens = 0
+    output_tokens = 0
+    for msg in messages:
+        # 优先读 usage_metadata（LangChain 标准）
+        um = getattr(msg, "usage_metadata", None)
+        if um:
+            input_tokens += um.get("input_tokens", 0) or 0
+            output_tokens += um.get("output_tokens", 0) or 0
+            continue
+
+        # 兜底：response_metadata
+        rm = getattr(msg, "response_metadata", None) or {}
+        tu = rm.get("token_usage") or rm.get("usage") or {}
+        if tu:
+            input_tokens += tu.get("prompt_tokens", 0) or tu.get("input_tokens", 0) or 0
+            output_tokens += tu.get("completion_tokens", 0) or tu.get("output_tokens", 0) or 0
+    return input_tokens, output_tokens
+
+
 def run_task(
     task: EvalTask,
-    model: str = "openai:gpt-5.5",
+    model: str = "openai:gpt-4o",
     keep_workspace: bool = False,
 ) -> TaskResult:
     """运行单个评测任务。"""
@@ -76,33 +102,58 @@ def run_task(
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
 
-        # 2. 构建 Agent
-        cfg = AgentConfig(workspace=str(ws), model=model, verbose=False)
+        # 2. 构建 Agent 配置（用 for_test 模拟旧接口）
+        cfg = AgentConfig.for_test(workspace=ws, model=model)
+        cfg.verbose = False
+        cfg.max_iterations = task.max_iterations
+
+        # 3. 构建 Agent
         metrics = MetricsCollector(session_id=task.id)
 
         with build_agent(cfg) as rt:
-            # 3. 执行任务
+            # 4. 执行任务
             response = rt.agent.invoke(
                 {"messages": [{"role": "user", "content": task.description}]},
                 config={"configurable": {"thread_id": f"eval-{task.id}"}},
             )
 
-            # 4. 收集工具调用序列
-            for msg in response.get("messages", []):
+            messages = response.get("messages", [])
+
+            # 5. 收集工具调用序列
+            for msg in messages:
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
                     for tc in msg.tool_calls:
                         result.tool_calls.append(tc["name"])
 
-            # 5. 收集指标
-            snap = metrics.snapshot()
-            result.input_tokens = snap["input_tokens"]
-            result.output_tokens = snap["output_tokens"]
-            result.cache_hit_rate = snap["cache_hit_rate"]
+            # 6. 收集 Token：先从 response 读（可靠），再从 metrics 读（兜底）
+            in_tok, out_tok = _extract_usage_from_messages(messages)
+            if in_tok == 0 and out_tok == 0:
+                try:
+                    snap = metrics.snapshot()
+                    in_tok = snap.get("input_tokens", 0)
+                    out_tok = snap.get("output_tokens", 0)
+                    result.cache_hit_rate = snap.get("cache_hit_rate", 0.0)
+                except Exception:
+                    pass
+            result.input_tokens = in_tok
+            result.output_tokens = out_tok
 
-        # 6. 检查成功断言
+        # 7. 检查成功断言
         passed, assert_err = run_assert(task.success_assert, ws)
         result.passed = passed
         result.assert_error = assert_err or None
+
+        # 8. 补充诊断信息（断言失败但没错误信息 / Agent 没动作）
+        if not passed:
+            if not result.assert_error:
+                result.assert_error = (
+                    f"❌ 断言失败（无详细错误信息）\n"
+                    f"  断言表达式: {task.success_assert}\n"
+                    f"  工具调用次数: {len(result.tool_calls)}\n"
+                    f"  工具序列: {result.tool_calls}"
+                )
+            if not result.tool_calls and not result.error:
+                result.error = "Agent 未调用任何工具（LLM 可能直接回答了，没有执行修改）"
 
     except Exception as e:
         result.error = f"{type(e).__name__}: {e}"
@@ -117,7 +168,7 @@ def run_task(
 
 def run_suite(
     tasks: list[EvalTask],
-    model: str = "openai:gpt-5.5",
+    model: str = "openai:gpt-4o",
     parallel: bool = False,
     max_workers: int = 4,
     progress_callback=None,

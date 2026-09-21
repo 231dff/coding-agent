@@ -14,14 +14,19 @@ tasks:
 
         def handler(req):
             return process(req)
+    # 修复：去掉 YAML `|` 块里的 `\` 续行（YAML 里 `\` 是字面字符，不续行）
     success_assert: |
-      all("handle" in (ws / f).read_text() for f in ["service.py", "api.py"]) and \
-      all("process" not in (ws / f).read_text() for f in ["service.py", "api.py"])
+      _files = ["service.py", "api.py"]
+      all("handle" in (ws / f).read_text() for f in _files) and all(
+          "process" not in (ws / f).read_text() for f in _files
+      )
     expected_tools: [analyze_impact, find_callers, begin_transaction, tx_edit, tx_commit]
     token_budget: 8000
 
   - id: add_param_with_callers
-    description: "给 utils.py 的 format_date 函数添加 tz 参数，默认 UTC，并更新所有调用方。"
+    description: |
+      给 utils.py 的 format_date 函数添加 tz 参数，默认 UTC，并更新所有调用方。
+      必须实际调用 edit_file 修改 utils.py 和 main.py。
     setup:
       utils.py: |
         def format_date(d):
@@ -29,9 +34,8 @@ tasks:
       main.py: |
         from utils import format_date
         print(format_date("2026-01-01"))
+    # 修复：去掉 `\` 续行
     success_assert: |
-      "tz" in (ws / "utils.py").read_text() and \
-      "tz" in (ws / "main.py").read_text()
+      "tz" in (ws / "utils.py").read_text() and "tz" in (ws / "main.py").read_text()
     expected_tools: [analyze_impact, read_file, edit_file]
     token_budget: 8000
-    

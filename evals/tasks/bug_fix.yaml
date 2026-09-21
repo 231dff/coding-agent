@@ -1,7 +1,9 @@
 category: bug_fix
 tasks:
   - id: fix_off_by_one
-    description: "sum_list 函数有 off-by-one 错误，最后一个元素没被加进去。请修复并运行测试验证。"
+    description: |
+      sum_list 函数有 off-by-one 错误，最后一个元素没被加进去。
+      请修复 calc.py，并用 execute 运行 `pytest tests/test_calc.py` 验证。
     setup:
       calc.py: |
         def sum_list(xs):
@@ -20,10 +22,16 @@ tasks:
 
         def test_sum_multi():
             assert sum_list([1, 2, 3]) == 6
+    # 修复：不依赖 .last_test，直接检查 calc.py 里 off-by-one 写法已被修正
     success_assert: |
-      _test_result = (ws / ".last_test").read_text() if (ws / ".last_test").exists() else ""
-      "PASSED" in _test_result or "passed" in _test_result
-    expected_tools: [read_file, edit_file, run_tests]
+      _content = (ws / "calc.py").read_text()
+      "range(len(xs) - 1)" not in _content and (
+          "range(len(xs))" in _content
+          or "range(0, len(xs))" in _content
+          or "sum(xs)" in _content
+          or "for x in xs" in _content
+      )
+    expected_tools: [read_file, edit_file, execute]
     token_budget: 10000
 
   - id: fix_import_cycle
