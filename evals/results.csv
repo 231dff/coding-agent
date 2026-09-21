@@ -1,0 +1,9 @@
+task_id,category,passed,duration_s,tool_calls,input_tokens,output_tokens,cache_hit_rate,error,assert_error
+fix_off_by_one,bug_fix,True,43.75,"['read_file', 'search_tools', 'search_tools', 'edit_file', 'run_tests', 'run_tests', 'run_tests', 'read_file', 'search_tools', 'run_tests', 'run_tests']",52815,1407,0.0,,
+fix_import_cycle,bug_fix,True,20.5,"['read_file', 'read_file', 'edit_file', 'grep_search']",18764,970,0.0,,
+upgrade_api_usage,dep_upgrade,True,13.16,"['grep_search', 'read_file', 'edit_file']",18359,380,0.0,,
+rename_across_files,multi_file,True,16.63,"['glob_files', 'grep_search', 'read_file', 'read_file', 'edit_file', 'edit_file', 'grep_search']",24144,696,0.0,,
+add_param_with_callers,multi_file,True,24.09,"['glob_files', 'glob_files', 'read_file', 'read_file', 'grep_search', 'edit_file', 'edit_file', 'edit_file', 'read_file', 'read_file']",34366,1259,0.0,,
+fix_add_bug,single_file,True,11.67,"['read_file', 'edit_file']",13579,304,0.0,,
+add_docstring,single_file,True,11.29,"['glob_files', 'read_file', 'edit_file']",18211,247,0.0,,
+rename_function,single_file,True,17.39,"['glob_files', 'grep_search', 'read_file', 'edit_file', 'grep_search', 'grep_search']",32744,517,0.0,,

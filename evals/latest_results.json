@@ -1,0 +1,152 @@
+[
+  {
+    "task_id": "fix_off_by_one",
+    "category": "bug_fix",
+    "passed": true,
+    "duration_s": 43.75,
+    "tool_calls": [
+      "read_file",
+      "search_tools",
+      "search_tools",
+      "edit_file",
+      "run_tests",
+      "run_tests",
+      "run_tests",
+      "read_file",
+      "search_tools",
+      "run_tests",
+      "run_tests"
+    ],
+    "input_tokens": 52815,
+    "output_tokens": 1407,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  },
+  {
+    "task_id": "fix_import_cycle",
+    "category": "bug_fix",
+    "passed": true,
+    "duration_s": 20.5,
+    "tool_calls": [
+      "read_file",
+      "read_file",
+      "edit_file",
+      "grep_search"
+    ],
+    "input_tokens": 18764,
+    "output_tokens": 970,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  },
+  {
+    "task_id": "upgrade_api_usage",
+    "category": "dep_upgrade",
+    "passed": true,
+    "duration_s": 13.16,
+    "tool_calls": [
+      "grep_search",
+      "read_file",
+      "edit_file"
+    ],
+    "input_tokens": 18359,
+    "output_tokens": 380,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  },
+  {
+    "task_id": "rename_across_files",
+    "category": "multi_file",
+    "passed": true,
+    "duration_s": 16.63,
+    "tool_calls": [
+      "glob_files",
+      "grep_search",
+      "read_file",
+      "read_file",
+      "edit_file",
+      "edit_file",
+      "grep_search"
+    ],
+    "input_tokens": 24144,
+    "output_tokens": 696,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  },
+  {
+    "task_id": "add_param_with_callers",
+    "category": "multi_file",
+    "passed": true,
+    "duration_s": 24.09,
+    "tool_calls": [
+      "glob_files",
+      "glob_files",
+      "read_file",
+      "read_file",
+      "grep_search",
+      "edit_file",
+      "edit_file",
+      "edit_file",
+      "read_file",
+      "read_file"
+    ],
+    "input_tokens": 34366,
+    "output_tokens": 1259,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  },
+  {
+    "task_id": "fix_add_bug",
+    "category": "single_file",
+    "passed": true,
+    "duration_s": 11.67,
+    "tool_calls": [
+      "read_file",
+      "edit_file"
+    ],
+    "input_tokens": 13579,
+    "output_tokens": 304,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  },
+  {
+    "task_id": "add_docstring",
+    "category": "single_file",
+    "passed": true,
+    "duration_s": 11.29,
+    "tool_calls": [
+      "glob_files",
+      "read_file",
+      "edit_file"
+    ],
+    "input_tokens": 18211,
+    "output_tokens": 247,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  },
+  {
+    "task_id": "rename_function",
+    "category": "single_file",
+    "passed": true,
+    "duration_s": 17.39,
+    "tool_calls": [
+      "glob_files",
+      "grep_search",
+      "read_file",
+      "edit_file",
+      "grep_search",
+      "grep_search"
+    ],
+    "input_tokens": 32744,
+    "output_tokens": 517,
+    "cache_hit_rate": 0.0,
+    "error": null,
+    "assert_error": null
+  }
+]
