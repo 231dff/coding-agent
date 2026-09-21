@@ -89,6 +89,53 @@ jobs:
           pytest tests/contracts/ -v --tb=short --no-cov
 
   # ============================================================
+  # 工程量化评测（仅 main 分支或手动触发）
+  # ============================================================
+  eval:
+    name: Eval
+    runs-on: ubuntu-latest
+    # 只在 main 分支 push 或手动触发时运行，避免浪费 API Token
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    env:
+      # ★ 用 qwen，需要 DashScope Key
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+      # ★ 评测模式：精简 token / 关闭非必要中间件
+      AGENT_EVAL_MODE: "true"
+      # ★ 关闭 LangSmith：避免超时刷屏（你本地已经踩过）
+      LANGCHAIN_TRACING_V2: "false"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run evals
+        run: |
+          python -m evals \
+            --model qwen:qwen3.7-flash \
+            --baseline evals/baseline.json \
+            --max-workers 1 \
+            --output docs/eval_report.md \
+            --results-json evals/latest_results.json \
+            --csv evals/results.csv
+
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: |
+            docs/eval_report.md
+            evals/latest_results.json
+            evals/results.csv
+
+  # ============================================================
   # 代码风格
   # ============================================================
   lint:
