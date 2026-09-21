@@ -813,7 +813,9 @@ def _print_final(content: str, rt, thread_id: str, turns_count: int) -> None:
     if content:
         console.print(Panel(Markdown(content), title="回复", border_style="cyan"))
     else:
-        console.print(Panel("[dim](模型无文本输出，可能是工具调用已完成)[/dim]", border_style="cyan"))
+        console.print(
+            Panel("[dim](模型无文本输出，可能是工具调用已完成)[/dim]", border_style="cyan")
+        )
 
     if turns_count > 1:
         console.print(
@@ -920,7 +922,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         if lower_input == "/trace":
             show_trace(display)
             continue
-        if lower_input == "/thinking":            # ★ 新增
+        if lower_input == "/thinking":  # ★ 新增
             show_thinking(rt, thread_id)
             continue
         if lower_input == "/cards":
