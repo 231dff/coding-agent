@@ -7,8 +7,9 @@ from mcp_client.client import MCPConfig, load_mcp_tools_sync
 
 def test_empty_config():
     config = MCPConfig(servers={})
-    tools = load_mcp_tools_sync(config)
+    tools, tool_to_server = load_mcp_tools_sync(config)
     assert tools == []
+    assert tool_to_server == {}
 
 
 @pytest.mark.integration
@@ -23,6 +24,6 @@ def test_load_git_server_tools(tmp_path):
             }
         }
     )
-    tools = load_mcp_tools_sync(config)
+    tools, _ = load_mcp_tools_sync(config)
     names = [t.name for t in tools]
     assert "git_status" in names or "git_diff" in names

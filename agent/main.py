@@ -14,6 +14,7 @@ import os
 import sys
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
@@ -859,7 +860,6 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
     tool_seen: set[str] = set()
     _last_update = [0.0]
 
-    REASONING_DISPLAY_MAX = 800
     TOOL_DISPLAY_MAX = 6
 
     def seal_round() -> None:
@@ -881,34 +881,26 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
     def build_display() -> Text:
         t = Text()
 
-        # 工具事件（历史，跨轮次）
+        # 只保留工具轨迹（跨轮次）
         if tool_events:
             for line in tool_events[-TOOL_DISPLAY_MAX:]:
                 t.append(line + "\n", style="cyan")
             t.append("\n")
 
-        # 当前轮次的 reasoning
-        reasoning = "".join(reasoning_display)
-        if reasoning:
-            if len(reasoning) > REASONING_DISPLAY_MAX:
-                reasoning = "… " + reasoning[-REASONING_DISPLAY_MAX:]
-            t.append("💭 思考中…\n", style="dim italic")
-            t.append(reasoning, style="dim")
-            t.append("\n\n")
-
-        # 当前轮次的 content（只显示本轮的，不拼历史）
-        cur = "".join(cur_content)
-        if cur:
-            t.append(cur)
-
+        t.append("💭 思考中…", style="dim italic")
         return t
 
-    live = Live(
-        build_display(),
-        console=console,
-        refresh_per_second=4,
-        transient=True,
-        vertical_overflow="visible",
+    use_live = console.is_terminal
+    live = (
+        Live(
+            build_display(),
+            console=console,
+            refresh_per_second=4,
+            transient=True,
+            vertical_overflow="visible",
+        )
+        if use_live
+        else nullcontext()
     )
 
     with live:
@@ -954,18 +946,21 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
                 if name not in tool_seen:
                     tool_seen.add(name)
                     tool_events.append(f"  ⚙ {name} ✓")
+                    if not use_live:
+                        console.print(f"  ⚙ {name} ✓")
 
                 seal_round()
                 reasoning_display.clear()
 
             now = time.time()
-            if now - _last_update[0] > 0.25:
+            if use_live and now - _last_update[0] > 0.25:
                 live.update(build_display())
                 _last_update[0] = now
 
         # 流结束：把最后一轮收进去
         seal_round()
-        live.update(build_display())
+        if use_live:
+            live.update(build_display())
 
     # ---------- 持久化全部轮次 ----------
     try:
