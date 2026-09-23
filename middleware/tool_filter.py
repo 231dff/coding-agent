@@ -1,8 +1,9 @@
 """工具过滤中间件。
 
-- core_tools 全局固定（覆盖文件读写的所有基础能力）
+- core_tools 全局固定
+- MCP 工具**默认不暴露**，按需通过 `mcp_use_server` 揭示
 - active skills 缓存（load_skill 触发）
-- searched_tools 缓存（search_tools 触发，让搜到的工具真正生效）
+- searched_tools 缓存（search_tools 触发）
 - 兼容老接口：保留 _extract_active_skills(messages)
 """
 
@@ -12,21 +13,19 @@ from dataclasses import dataclass
 
 from langchain.agents.middleware import AgentMiddleware
 
-# ★ 核心工具：覆盖「读 → 改 → 写 → 跑」闭环所需的最小集
 _DEFAULT_CORE_TOOLS = frozenset(
     {
-        # 文件读
         "read_file",
         "grep_search",
         "glob_files",
         "ls_dir",
-        # 文件写（必须保留 write_file，否则无法创建新文件）
         "edit_file",
         "write_file",
-        # 执行
         "execute",
-        # 工具发现
         "search_tools",
+        # ★ MCP 元工具始终暴露
+        "mcp_list_servers",
+        "mcp_use_server",
     }
 )
 
@@ -34,7 +33,7 @@ _DEFAULT_CORE_TOOLS = frozenset(
 @dataclass
 class ToolFilterConfig:
     core_tools: frozenset[str] = _DEFAULT_CORE_TOOLS
-    max_exposed: int = 20
+    max_exposed: int = 30
     enabled: bool = True
 
 
@@ -46,13 +45,31 @@ class ToolFilterMiddleware(AgentMiddleware):
         all_tool_names: list[str],
         skill_tool_map: dict[str, list[str]] | None = None,
         config: ToolFilterConfig | None = None,
+        # ★ 新增：MCP server → 工具名列表
+        mcp_server_to_tools: dict[str, list[str]] | None = None,
+        # ★ 新增：启动时就暴露的 server
+        auto_expose_servers: list[str] | None = None,
     ):
         super().__init__()
         self.all_tool_names = set(all_tool_names)
         self.skill_tool_map = skill_tool_map or {}
         self.config = config or ToolFilterConfig()
+
         self._active_skills: set[str] = set()
         self._searched_tools: set[str] = set()
+
+        # ★ MCP 相关
+        self._mcp_server_to_tools: dict[str, list[str]] = mcp_server_to_tools or {}
+        self._exposed_mcp_servers: set[str] = set(auto_expose_servers or [])
+
+    # ---------- 对外接口：被 mcp_use_server 元工具调用 ----------
+
+    def expose_mcp_server(self, server_name: str) -> bool:
+        """揭示一个 MCP server 的工具（下一轮起暴露）。"""
+        if server_name not in self._mcp_server_to_tools:
+            return False
+        self._exposed_mcp_servers.add(server_name)
+        return True
 
     # ---------- 中间件入口 ----------
 
@@ -77,7 +94,6 @@ class ToolFilterMiddleware(AgentMiddleware):
     # ---------- 内部 ----------
 
     def _track_tool_calls(self, request) -> None:
-        """运行时：检测本轮 load_skill，更新技能缓存。"""
         tool_call = getattr(request, "tool_call", None)
         if not tool_call:
             return
@@ -87,13 +103,6 @@ class ToolFilterMiddleware(AgentMiddleware):
                 self._active_skills.add(name)
 
     def _track_search_result(self, request, result) -> None:
-        """解析 search_tools 的返回，把匹配到的工具名加入 searched_tools。
-
-        search_tools 的返回格式：
-            找到 N 个匹配工具:
-            - tool_name: description
-            - tool_name2: description
-        """
         tool_call = getattr(request, "tool_call", None)
         if not tool_call or tool_call.get("name") != "search_tools":
             return
@@ -109,16 +118,38 @@ class ToolFilterMiddleware(AgentMiddleware):
                     if name in self.all_tool_names:
                         self._searched_tools.add(name)
 
+    def _mcp_tools_to_expose(self) -> set[str]:
+        """当前已揭示的 MCP 工具名集合。"""
+        result: set[str] = set()
+        for server in self._exposed_mcp_servers:
+            result.update(self._mcp_server_to_tools.get(server, []))
+        return result
+
     def _compute_active(self, request) -> set[str]:
-        active = set(self.config.core_tools)
+        """计算本轮暴露的工具集。
+
+        规则：
+        1. core_tools（含 MCP 元工具）永远暴露
+        2. 已激活 skill 的工具暴露
+        3. search_tools 搜到的工具暴露
+        4. ★ 只有"已揭示"的 MCP server 的工具才暴露
+        5. 超出 max_exposed 时按字母序裁剪额外工具
+        """
+        core = set(self.config.core_tools)
+
+        active = set(core)
         for skill_name in self._active_skills:
             active.update(self.skill_tool_map.get(skill_name, []))
         active.update(self._searched_tools)
+        active.update(self._mcp_tools_to_expose())
 
         if len(active) > self.config.max_exposed:
-            core = set(self.config.core_tools)
-            extra = list(active - core)
-            active = core | set(extra[: self.config.max_exposed - len(core)])
+            extra = sorted(active - core)
+            budget = self.config.max_exposed - len(core)
+            if budget > 0:
+                active = core | set(extra[:budget])
+            else:
+                active = core
 
         return active
 
@@ -151,7 +182,6 @@ class ToolFilterMiddleware(AgentMiddleware):
     # ---------- 兼容老接口 ----------
 
     def _extract_active_skills(self, messages) -> set[str]:
-        """[兼容老接口] 从 messages 列表里提取 load_skill 的技能名。"""
         skills: set[str] = set()
         for msg in messages or []:
             tool_calls = getattr(msg, "tool_calls", None)
@@ -176,5 +206,12 @@ class ToolFilterMiddleware(AgentMiddleware):
 def create_tool_filter_middleware(
     all_tool_names: list[str],
     skill_tool_map: dict[str, list[str]] | None = None,
+    mcp_server_to_tools: dict[str, list[str]] | None = None,
+    auto_expose_servers: list[str] | None = None,
 ) -> ToolFilterMiddleware:
-    return ToolFilterMiddleware(all_tool_names, skill_tool_map)
+    return ToolFilterMiddleware(
+        all_tool_names,
+        skill_tool_map,
+        mcp_server_to_tools=mcp_server_to_tools,
+        auto_expose_servers=auto_expose_servers,
+    )

@@ -49,6 +49,7 @@ from observability.logger import (
     bind_context,
     configure_logging,
     get_logger,
+    log_file_path,
 )
 from observability.metrics_display import MetricsDisplay
 from observability.trace import (
@@ -68,12 +69,60 @@ console = Console()
 log = get_logger("main")
 
 
-BANNER = """[bold cyan]
-  ╔══════════════════════════════════════════════╗
-  ║           Coding Agent                        ║
-  ║  对任意项目进行代码理解、修改与测试           ║
-  ╚══════════════════════════════════════════════╝
-[/bold cyan]"""
+# ============================================================
+# ASCII art 启动横幅（figlet ANSI Shadow 字体）
+# ============================================================
+
+_BANNER_ART = r"""
+ ██████╗ ██████╗ ██████╗ ██╗███╗   ██╗ ██████╗
+██╔════╝██╔═══██╗██╔══██╗██║████╗  ██║██╔════╝
+██║     ██║   ██║██║  ██║██║██╔██╗ ██║██║  ███╗
+██║     ██║   ██║██║  ██║██║██║╚██╗██║██║   ██║
+╚██████╗╚██████╔╝██████╔╝██║██║ ╚████║╚██████╔╝
+ ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝
+"""
+
+BANNER = _BANNER_ART
+
+
+# ============================================================
+# 静音第三方库日志
+# ============================================================
+
+
+def _silence_noisy_loggers() -> None:
+    """静音第三方库的 INFO 级日志（httpx / mcp / openai 等）。
+
+    这些库会输出大量 HTTP 请求细节，对最终用户无价值。
+
+    用户可通过环境变量打开：
+        AGENT_VERBOSE_LOGS=1   ← 调试时用
+    """
+    import logging
+
+    if os.getenv("AGENT_VERBOSE_LOGS", "false").lower() in ("1", "true", "yes"):
+        return
+
+    noisy_prefixes = (
+        "httpx",
+        "httpcore",
+        "mcp",
+        "langchain_openai",
+        "openai",
+        "urllib3",
+        "filelock",
+        "asyncio",
+        "matplotlib",
+    )
+
+    # 动态遍历所有已注册 logger
+    for name in list(logging.root.manager.loggerDict.keys()):
+        if any(name.startswith(p) for p in noisy_prefixes):
+            logging.getLogger(name).setLevel(logging.WARNING)
+
+    # 兜底：直接按名设置（防止后续动态创建）
+    for p in noisy_prefixes:
+        logging.getLogger(p).setLevel(logging.WARNING)
 
 
 # ============================================================
@@ -87,31 +136,168 @@ def _default_thread_id(project_path: Path) -> str:
 
 
 # ============================================================
-# 欢迎 / 帮助 / 配置
+# Agent 装配（带 spinner）
 # ============================================================
 
 
-def print_welcome(project_path: Path, rt) -> None:
-    console.print(BANNER)
-    console.print(f"[bold]项目:[/bold] {project_path}")
+def _boot_agent_with_status(cfg):
+    """带 spinner 的 Agent 装配。
+
+    - 整个装配过程（8~15 秒）只显示一个动态 spinner
+    - 详细步骤由 build_agent 内部 log.info 记录，屏幕不显示
+    - 装配完成后由调用方打印一行"已就绪"摘要
+    - 异常 / Ctrl+C 由 rich.status 自动处理
+
+    Returns:
+        AgentRuntime
+    """
+    with console.status(
+        "[cyan]正在装配 Agent…[/cyan]",
+        spinner="dots",
+        spinner_style="cyan",
+    ):
+        rt = build_agent(cfg)
+    return rt
+
+
+def _print_ready_line(rt) -> None:
+    """打印一行"已就绪"摘要。"""
+    mcp_prefixes = ("mcp_", "github_", "filesystem_", "fetch_", "git_", "postgres_")
+    mcp_count = sum(
+        1 for t in rt.tools if any(t.name.startswith(p) for p in mcp_prefixes)
+    )
+    skill_count = (
+        len(rt.skill_registry.all_skills()) if rt.skill_registry else 0
+    )
+
+    parts = [
+        f"[bold green]✓[/bold green] [white]已就绪[/white]",
+        f"[dim]tools={len(rt.tools)}[/dim]",
+    ]
+    if mcp_count:
+        parts.append(f"[dim]mcp={mcp_count}[/dim]")
+    parts.append(f"[dim]skills={skill_count}[/dim]")
+
+    console.print("  " + "  ".join(parts))
+
+
+# ============================================================
+# 欢迎屏（精致版）
+# ============================================================
+
+
+def _build_welcome_banner():
+    """构建启动横幅：ASCII art + 标语，圆角框居中。"""
+    from rich import box
+    from rich.align import Align
+
+    art = Text(_BANNER_ART.strip("\n"), style="bold bright_cyan", no_wrap=True)
+
+    tagline = Text(
+        "Read it.  Change it.  Test it.  Fix it.",
+        style="italic dim white",
+        justify="center",
+    )
+
+    content = Text.assemble(art, "\n\n", tagline)
+
+    return Panel(
+        Align.center(content, vertical="middle"),
+        box=box.ROUNDED,
+        border_style="bright_cyan",
+        padding=(1, 4),
+    )
+
+
+def _build_welcome_info(project_path, rt, thread_id: str | None = None):
+    """构建运行时信息表。"""
+    from rich.table import Table
 
     cfg = rt.config
-    console.print(f"[bold]模型:[/bold] {cfg.provider_id}/{cfg.model} [dim]({cfg.base_url})[/dim]")
+
+    info = Table(
+        show_header=False,
+        show_edge=False,
+        box=None,
+        padding=(0, 2),
+        expand=False,
+    )
+    info.add_column("icon", style="bright_cyan", width=3, justify="center")
+    info.add_column("key", style="dim", width=6, justify="right")
+    info.add_column("value", style="")
+
+    info.add_row("📁", "项目", f"[white]{project_path}[/white]")
+    info.add_row(
+        "🧠",
+        "模型",
+        f"[white]{cfg.provider_id}[/white]"
+        f"[dim] / [/dim]"
+        f"[bright_white]{cfg.model}[/bright_white]",
+    )
 
     if rt.skill_registry:
         stats = rt.skill_registry.stats()
-        console.print(
-            f"[dim]技能: {stats['model_invoked']} 个自动调用, "
-            f"{stats['user_invoked']} 个用户触发[/dim]"
+        total = stats["model_invoked"] + stats["user_invoked"]
+        info.add_row(
+            "🔧",
+            "技能",
+            f"[white]{total}[/white] 个 "
+            f"[dim]({stats['model_invoked']} 自动 · "
+            f"{stats['user_invoked']} 手动)[/dim]",
         )
 
-    info = store_backend_info()
-    console.print(f"[dim]记忆: {info.get('backend', '?')} ({info.get('type', '?')})[/dim]")
+    mem = store_backend_info()
+    info.add_row(
+        "💾",
+        "记忆",
+        f"[white]{mem.get('backend', '?')}[/white] "
+        f"[dim]({mem.get('type', '?')})[/dim]",
+    )
 
     if is_enabled():
-        console.print(f"[dim]LangSmith: {status_text()}[/dim]")
+        info.add_row("🔍", "追踪", f"[green]{status_text()}[/green]")
+    else:
+        info.add_row("🔍", "追踪", "[dim]未启用[/dim]")
 
-    console.print("[dim]输入任务描述，Enter 发送。输入 /help 查看命令。[/dim]\n")
+    # ★ 会话 ID（便于 /thread-id 恢复）
+    if thread_id:
+        info.add_row("🆔", "会话", f"[dim]{thread_id}[/dim]")
+
+    return info
+
+
+def _build_welcome_hints():
+    """底部操作提示。"""
+    t = Text(justify="center")
+    t.append("💡  ", style="")
+    t.append("直接输入任务描述", style="white")
+    t.append("，", style="dim")
+    t.append("Enter", style="bold cyan")
+    t.append(" 发送", style="dim")
+    t.append("\n")
+    t.append("📖  ", style="")
+    t.append("输入 ", style="dim")
+    t.append("/help", style="bold cyan")
+    t.append(" 查看全部命令", style="dim")
+    return t
+
+
+def print_welcome(project_path: Path, rt, thread_id: str | None = None) -> None:
+    """打印精致启动屏。"""
+    from rich.align import Align
+
+    console.print()
+    console.print(_build_welcome_banner())
+    console.print()
+    console.print(Align.center(_build_welcome_info(project_path, rt, thread_id)))
+    console.print()
+    console.print(Align.center(_build_welcome_hints()))
+    console.print()
+
+
+# ============================================================
+# 帮助
+# ============================================================
 
 
 def print_help() -> None:
@@ -125,7 +311,7 @@ def print_help() -> None:
             "  /config       显示当前配置\n"
             "  /metrics      显示本次会话指标\n"
             "  /trace        查看最近的调用指标\n"
-            "  /thinking     查看最近一次任务的思考过程\n"  # ★ 新增
+            "  /thinking     查看最近一次任务的思考过程\n"
             "  /cards        查看用户卡片（第 1 层记忆）\n"
             "  /recall <q>   检索历史会话（第 2 层记忆）\n"
             "  /memory       查看记忆后端状态\n"
@@ -192,7 +378,7 @@ def show_trace(display: MetricsDisplay) -> None:
 
 
 # ============================================================
-# 思考过程查询（新增）
+# 思考过程查询
 # ============================================================
 
 
@@ -223,7 +409,6 @@ def show_thinking(rt, thread_id: str) -> None:
         console.print("[dim]暂无思考记录[/dim]")
         return
 
-    # 按 round==1 切分段落，取最后一段
     segments: list[list[dict]] = []
     current: list[dict] = []
     for line in lines:
@@ -654,7 +839,7 @@ def _dedup_repeats(text: str) -> str:
 
 
 # ============================================================
-# 流式任务执行（★ 核心改动）
+# 流式任务执行
 # ============================================================
 
 
@@ -922,7 +1107,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         if lower_input == "/trace":
             show_trace(display)
             continue
-        if lower_input == "/thinking":  # ★ 新增
+        if lower_input == "/thinking":
             show_thinking(rt, thread_id)
             continue
         if lower_input == "/cards":
@@ -952,7 +1137,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                 continue
             task_text = handled
 
-        # ★ 绑定上下文（含 trace_id）
+        # 绑定上下文（含 trace_id）
         bind_context(
             session_id=rt.config.project_path.name,
             thread_id=thread_id,
@@ -1023,7 +1208,10 @@ def main() -> int:
     log_level = os.getenv("LOG_LEVEL", "INFO")
     configure_logging(level=log_level, json_output=json_logs)
 
-    # ★ 生成 trace_id
+    # ★ 静音第三方库日志（httpx / mcp / openai 等）
+    _silence_noisy_loggers()
+
+    # 生成 trace_id
     tid = new_trace_id()
 
     if os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true":
@@ -1061,12 +1249,11 @@ def main() -> int:
 
     thread_id = parsed.thread_id or _default_thread_id(project_path)
 
-    console.print(f"[dim]正在启动 Agent (project={project_path})...[/dim]")
-    console.print(f"[dim]会话 ID: {thread_id}[/dim]")
-    console.print(f"[dim]trace_id: {tid}[/dim]")  # ★ 显示
+    # ★ trace_id 写进日志上下文，屏幕不显示
+    bind_context(trace_id=tid, thread_id=thread_id)
 
     try:
-        rt = build_agent(cfg)
+        rt = _boot_agent_with_status(cfg)
     except Exception as e:
         log.error(
             "agent_start_failed",
@@ -1074,9 +1261,10 @@ def main() -> int:
             error=str(e),
         )
         console.print(f"[red]Agent 启动失败: {type(e).__name__}: {e}[/red]")
+        console.print(f"[dim]详细日志: {log_file_path()}[/dim]")
         return 1
 
-    # ★ 启动时补跑 pending 提炼
+    # 启动时补跑 pending 提炼
     try:
         process_pending_on_startup(rt, thread_id)
     except Exception:
@@ -1087,12 +1275,14 @@ def main() -> int:
 
     try:
         if parsed.task:
+            _print_ready_line(rt)
+            console.print()
             run_single_task(rt, parsed.task, thread_id, display)
         else:
-            print_welcome(project_path, rt)
+            print_welcome(project_path, rt, thread_id=thread_id)
             run_interactive(rt, thread_id, display)
     finally:
-        # ★ 异步提炼，不阻塞退出
+        # 异步提炼，不阻塞退出
         try:
             extract_and_save_memory_async(rt, thread_id)
         except Exception:

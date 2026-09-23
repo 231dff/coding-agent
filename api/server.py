@@ -46,7 +46,7 @@ from api.schemas import (
     SessionInfo,
     UserInfo,
 )
-from observability.logger import get_logger
+from observability.logger import configure_logging, get_logger
 from observability.trace import (
     get_trace_id,
     new_trace_id,
@@ -54,6 +54,8 @@ from observability.trace import (
     set_trace_id,
 )
 
+# 确保日志系统已初始化（幂等，重复调用无副作用）
+configure_logging()
 log = get_logger("server")
 
 
@@ -79,18 +81,21 @@ _runtime_lock = asyncio.Lock()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"[server] AGENT_MODE = {AGENT_MODE}")
-    print(f"[server] AUTH_MODE = {AUTH_MODE}")
-    print(f"[server] REQUIRE_AUTH = {REQUIRE_AUTH}")
-    print(f"[server] CORS_ORIGINS = {CORS_ORIGINS}")
+    log.info(
+        "server_config",
+        agent_mode=AGENT_MODE,
+        auth_mode=AUTH_MODE,
+        require_auth=REQUIRE_AUTH,
+        cors_origins=CORS_ORIGINS,
+    )
 
     if AGENT_MODE == "real":
         try:
             from agent.core import build_agent  # noqa: F401
 
-            print("[server] real 模式：agent.core 可导入")
+            log.info("server_mode", mode="real", note="agent.core 可导入")
         except Exception as e:
-            print(f"[server] ⚠️ real 模式导入失败，将降级为 mock: {e}")
+            log.warning("server_real_mode_failed", error=str(e), fallback="mock")
             globals()["AGENT_MODE"] = "mock"
 
     # 预初始化 metrics store
@@ -99,15 +104,19 @@ async def lifespan(app: FastAPI):
 
         store = get_store()
         stats = store.stats()
-        print(f"[server] Metrics store: {stats['db_path']} ({stats['total_rows']} rows)")
+        log.info(
+            "metrics_store_ready",
+            db_path=stats["db_path"],
+            rows=stats["total_rows"],
+        )
     except Exception as e:
-        print(f"[server] Metrics store 初始化失败: {e}")
+        log.warning("metrics_store_init_failed", error=str(e))
 
     # ★ 优雅关闭：捕获 SIGTERM / SIGINT
     shutdown_event = asyncio.Event()
 
     def _on_shutdown_signal():
-        print("[server] 收到关闭信号，开始优雅关闭")
+        log.info("shutdown_signal_received")
         shutdown_event.set()
 
     loop = asyncio.get_running_loop()
@@ -121,25 +130,25 @@ async def lifespan(app: FastAPI):
     yield
 
     # 等待正在处理的请求（最多 10 秒）
-    print("[server] 等待正在处理的请求（最多 10s）...")
+    log.info("shutdown_waiting", max_wait_s=10)
     try:
         await asyncio.wait_for(shutdown_event.wait(), timeout=10.0)
     except asyncio.TimeoutError:
         pass
 
     # 清理所有 runtime
-    print("[server] 清理 runtime...")
+    log.info("shutdown_cleanup_runtime")
     for sid, rt in list(_runtimes.items()):
         if rt is None:
             continue
         try:
             rt.close()
         except Exception as e:
-            print(f"[server] 关闭 {sid} 失败: {e}")
+            log.warning("shutdown_session_failed", session_id=sid, error=str(e))
 
     _runtimes.clear()
     _sessions.clear()
-    print("[server] 关闭完成")
+    log.info("shutdown_complete")
 
 
 # ============================================================
@@ -405,7 +414,7 @@ async def close_session(
         try:
             rt.close()
         except Exception as e:
-            print(f"[server] 关闭 {session_id} 失败: {e}")
+            log.warning("session_close_failed", session_id=session_id, error=str(e))
 
     return {"ok": True}
 
@@ -501,7 +510,12 @@ async def approve_tool(
     if not ok:
         raise HTTPException(404, f"未知审批: {req.approval_id}")
 
-    print(f"[server] 审批: user={user.id}, approval={req.approval_id}, decision={req.decision}")
+    log.info(
+        "approval_decision",
+        user_id=user.id,
+        approval_id=req.approval_id,
+        decision=req.decision,
+    )
     return ApproveResponse(ok=True, decision=req.decision)
 
 

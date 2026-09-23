@@ -9,6 +9,7 @@
 - 双层记忆（Cards + Retrieval）
 - LangGraph Store 后端
 - 幂等性保护（IdempotencyMiddleware）
+- ★ MCP 渐进式披露（mcp_list_servers / mcp_use_server 元工具）
 
 性能优化：
 - 沙箱启动与代码库分析并行执行
@@ -19,11 +20,16 @@
 - 日志脱敏（见 observability/redact.py）
 - 沙箱 release 不做任何删除（见 sandbox/pool.py）
 
-沙箱网络策略（★ 本次改动）：
+沙箱网络策略：
 - 默认断网（network=False），防止 Agent 外传代码 / 下载恶意依赖
-- 通过环境变量 AGENT_SANDBOX_NETWORK=true 临时开网
-- 通过环境变量 AGENT_SANDBOX_MEMORY / AGENT_SANDBOX_CPU 调整资源
-- 通过环境变量 AGENT_SANDBOX_IMAGE 指定自定义镜像（预装 numpy / matplotlib 等）
+- AGENT_SANDBOX_NETWORK=true 临时开网
+- AGENT_SANDBOX_MEMORY / AGENT_SANDBOX_CPU 调整资源
+- AGENT_SANDBOX_IMAGE 指定自定义镜像
+
+MCP 工具策略：
+- MCP 工具**默认不暴露**给 LLM，节省 token
+- Agent 通过 mcp_list_servers / mcp_use_server 元工具按需揭示
+- autoExpose 列表里的 server 启动时立即暴露
 """
 
 from __future__ import annotations
@@ -123,31 +129,31 @@ from tools.transaction_ops import TRANSACTION_TOOLS
 from tools.transaction_ops import bind as bind_tx
 
 # ---------- MCP ----------
+from observability.logger import get_logger
+
+log = get_logger("core")
+
 try:
     from mcp_client.client import MCPConfig, load_mcp_tools_sync
 
     _MCP_AVAILABLE = True
 except ImportError as _e:
-    import sys
-
-    print(f"[core] MCP 导入失败: {_e}", file=sys.stderr)
+    log.warning("mcp_import_failed", error=str(_e))
     MCPConfig = None  # type: ignore
     load_mcp_tools_sync = None  # type: ignore
     _MCP_AVAILABLE = False
 
 
 # ============================================================
-# 环境变量开关（评测 / 沙箱 / 精简模式用）
+# 环境变量开关
 # ============================================================
 
 
 def _env_bool(key: str, default: str = "true") -> bool:
-    """读布尔环境变量。"""
     return os.getenv(key, default).lower() == "true"
 
 
 def _env_int(key: str, default: int) -> int:
-    """读整型环境变量。"""
     try:
         return int(os.getenv(key, str(default)))
     except (TypeError, ValueError):
@@ -155,7 +161,6 @@ def _env_int(key: str, default: int) -> int:
 
 
 def _env_float(key: str, default: float) -> float:
-    """读浮点环境变量。"""
     try:
         return float(os.getenv(key, str(default)))
     except (TypeError, ValueError):
@@ -163,15 +168,11 @@ def _env_float(key: str, default: float) -> float:
 
 
 def _is_eval_mode() -> bool:
-    """评测模式：关闭所有非必要中间件，最小化 token 和启动开销。
-
-    开启方式：设置 AGENT_EVAL_MODE=true
-    """
     return _env_bool("AGENT_EVAL_MODE", "false")
 
 
 # ============================================================
-# 沙箱配置（★ 本次新增）
+# 沙箱配置
 # ============================================================
 
 
@@ -186,14 +187,6 @@ class SandboxSettings:
 
     @classmethod
     def from_env(cls) -> "SandboxSettings":
-        """从环境变量读取配置。
-
-        环境变量：
-        - AGENT_SANDBOX_NETWORK: "true" / "false"（默认 false，安全）
-        - AGENT_SANDBOX_MEMORY:  内存上限，如 "4g"（默认 "2g"）
-        - AGENT_SANDBOX_CPU:     CPU 核数上限，如 "4"（默认 "2.0"）
-        - AGENT_SANDBOX_IMAGE:   自定义镜像名（默认用 sandbox 内置默认）
-        """
         return cls(
             network=_env_bool("AGENT_SANDBOX_NETWORK", "false"),
             memory_limit=os.getenv("AGENT_SANDBOX_MEMORY", "2g"),
@@ -203,7 +196,7 @@ class SandboxSettings:
 
 
 # ============================================================
-# 全局沙箱工厂（进程级单例）
+# 全局沙箱工厂
 # ============================================================
 
 _SANDBOX_POOL: SandboxPool | None = None
@@ -211,7 +204,6 @@ _SANDBOX_POOL_LOCK = threading.Lock()
 
 
 def _get_sandbox_pool() -> SandboxPool:
-    """返回进程级沙箱工厂。"""
     global _SANDBOX_POOL
     with _SANDBOX_POOL_LOCK:
         if _SANDBOX_POOL is None:
@@ -226,10 +218,7 @@ def _get_sandbox_pool() -> SandboxPool:
 
 
 def load_system_prompt(agent_home: Path) -> str:
-    """加载系统提示词。
-
-    评测模式下优先使用 prompts/system_minimal.md（若存在）。
-    """
+    """加载系统提示词。"""
     if _is_eval_mode():
         minimal = agent_home / "prompts" / "system_minimal.md"
         if minimal.exists():
@@ -242,7 +231,7 @@ def load_system_prompt(agent_home: Path) -> str:
 
 
 def load_project_memory(project_path: Path) -> str:
-    """加载项目记忆（从用户项目里读取，启动时读一次）。"""
+    """加载项目记忆。"""
     if _is_eval_mode():
         return ""
     for name in ("AGENTS.md", "CLAUDE.md", "CODING_AGENT.md"):
@@ -253,7 +242,7 @@ def load_project_memory(project_path: Path) -> str:
 
 
 def render_tool_definitions(tools: list[Any]) -> str:
-    """渲染工具定义为字母序排列的稳定文本（用于前缀哈希校验）。"""
+    """渲染工具定义为稳定文本。"""
     lines = []
     for t in sorted(tools, key=lambda x: x.name):
         desc = (t.description or "").split("\n", 1)[0].strip()
@@ -261,31 +250,47 @@ def render_tool_definitions(tools: list[Any]) -> str:
     return "\n".join(lines)
 
 
-def build_mcp_config(agent_home: Path):
-    """构建 MCP Server 配置。"""
+# ============================================================
+# MCP 加载
+# ============================================================
+
+
+def build_mcp_config(agent_home: Path, project_path: Path | None = None):
+    """构建 MCP 配置。
+
+    从以下位置读取（优先级从高到低）：
+    1. <project>/.coding-agent/mcp.json
+    2. ~/.coding-agent/mcp.json
+    3. 内置 git / web server（AGENT_MCP_INCLUDE_BUILTIN=true）
+
+    兼容 Claude Desktop / Cursor 的 mcpServers 格式。
+    支持顶层 autoExpose 字段。
+    """
     if not _MCP_AVAILABLE:
         raise RuntimeError("MCP 不可用（mcp_client.client 导入失败）")
 
-    return MCPConfig(
-        servers={
-            "git": {
-                "command": "python",
-                "args": [str(agent_home / "mcp_client" / "servers" / "git_server.py")],
-                "transport": "stdio",
-            },
-            "web": {
-                "command": "python",
-                "args": [str(agent_home / "mcp_client" / "servers" / "web_search_server.py")],
-                "transport": "stdio",
-            },
-        }
+    from mcp_client.client import load_mcp_servers
+
+    include_builtin = _env_bool("AGENT_MCP_INCLUDE_BUILTIN", "false")
+    return load_mcp_servers(
+        project_path=project_path,
+        agent_home=agent_home,
+        include_builtin=include_builtin,
+        verbose=True,
     )
 
 
-def _load_mcp_in_thread(config, timeout: float = 15.0) -> list[Any]:
-    """在独立线程里加载 MCP，超时或失败返回空，不阻塞启动。"""
+def _load_mcp_in_thread_with_mapping(
+    config, timeout: float = 60.0
+) -> tuple[list[Any], dict[str, str]]:
+    """在独立线程里加载 MCP，返回 (tools, tool_to_server)。
+
+    Returns:
+        - tools: MCP 工具列表
+        - tool_to_server: 工具名 → server 名
+    """
     if load_mcp_tools_sync is None:
-        return []
+        return [], {}
 
     def _run():
         return load_mcp_tools_sync(config)
@@ -295,26 +300,55 @@ def _load_mcp_in_thread(config, timeout: float = 15.0) -> list[Any]:
         try:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
-            print(f"[core] MCP 加载超时（{timeout}s），降级为无 MCP 工具")
-            return []
+            log.warning("mcp_load_timeout", timeout_s=timeout)
+            return [], {}
         except Exception as e:
-            print(f"[core] MCP 加载失败: {e}")
-            return []
+            log.warning("mcp_load_failed", error=str(e))
+            return [], {}
+
+
+def _aggregate_server_to_tools(
+    mcp_tools: list[Any],
+    tool_to_server: dict[str, str],
+    configured_servers: list[str],
+) -> dict[str, list[str]]:
+    """把 tool_to_server 反向聚合为 server → [tool_name]。
+
+    对没有映射的工具，按前缀兜底匹配。
+    """
+    server_to_tools: dict[str, list[str]] = {}
+
+    for tool_name, server in tool_to_server.items():
+        server_to_tools.setdefault(server, []).append(tool_name)
+
+    # 兜底：按前缀猜
+    for t in mcp_tools:
+        if t.name in tool_to_server:
+            continue
+        for s in configured_servers:
+            if t.name.startswith(f"{s}_") or t.name.startswith(f"mcp_{s}_"):
+                server_to_tools.setdefault(s, []).append(t.name)
+                break
+
+    return server_to_tools
 
 
 # ============================================================
-# LLM 初始化（多 Provider + temperature 可选）
+# LLM 初始化
 # ============================================================
 
 
 def build_llm(cfg: AgentConfig):
     """初始化 LLM。"""
-    # ---------- Anthropic 原生接口 ----------
     if cfg.model_provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
-        print(f"[core] Anthropic 接口: provider={cfg.provider_id!r} model={cfg.model!r}")
-
+        log.info(
+            "llm_build",
+            backend="anthropic",
+            provider=cfg.provider_id,
+            model=cfg.model,
+        )
         kwargs: dict[str, Any] = {
             "model": cfg.model,
             "api_key": cfg.api_key,
@@ -326,12 +360,14 @@ def build_llm(cfg: AgentConfig):
 
         return ChatAnthropic(**kwargs)
 
-    # ---------- OpenAI 兼容接口 ----------
     from langchain_openai import ChatOpenAI
 
-    print(
-        f"[core] OpenAI 兼容接口: provider={cfg.provider_id!r} "
-        f"model={cfg.model!r} base_url={cfg.base_url!r}"
+    log.info(
+        "llm_build",
+        backend="openai-compatible",
+        provider=cfg.provider_id,
+        model=cfg.model,
+        base_url=cfg.base_url or "(default)",
     )
 
     kwargs: dict[str, Any] = {
@@ -353,7 +389,7 @@ def build_llm(cfg: AgentConfig):
 
 
 def _build_compaction_llm(cfg: AgentConfig):
-    """压缩用轻量模型：优先环境变量 AGENT_COMPACTION_MODEL，其次主模型。"""
+    """压缩用轻量模型。"""
     cheap_model = os.getenv("AGENT_COMPACTION_MODEL", "")
     if not cheap_model:
         return build_llm(cfg)
@@ -394,8 +430,6 @@ class AgentRuntime:
     _repair_graph: Any = field(default=None, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
-    # ---------- 转发到底层 agent ----------
-
     def invoke(self, *args, **kwargs):
         return self.agent.invoke(*args, **kwargs)
 
@@ -417,8 +451,6 @@ class AgentRuntime:
     def get_state(self, *args, **kwargs):
         return self.agent.get_state(*args, **kwargs)
 
-    # ---------- 懒加载图 ----------
-
     @property
     def planning_graph(self):
         if self._planning_graph is None:
@@ -438,10 +470,7 @@ class AgentRuntime:
             self._repair_graph = build_repair_graph(self.agent, _exec, self.checkpointer)
         return self._repair_graph
 
-    # ---------- 生命周期 ----------
-
     def close(self) -> None:
-        """释放资源。"""
         if self._closed:
             return
         self._closed = True
@@ -471,8 +500,6 @@ class AgentRuntime:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    # ---------- 状态查询 ----------
-
     def check_prefix_stability(self) -> bool:
         return self.assembler.check_prefix_stability()
 
@@ -481,16 +508,11 @@ class AgentRuntime:
 
 
 # ============================================================
-# 并行辅助
+# 沙箱 / 代码库
 # ============================================================
 
 
 def _build_sandbox_kwargs(settings: SandboxSettings) -> dict:
-    """把 SandboxSettings 转成 DockerSandbox 的构造参数。
-
-    有些 DockerSandbox 版本不一定支持 image 参数，做兼容处理：
-    只有在 settings.image 非空时才传。
-    """
     kwargs: dict[str, Any] = {
         "memory_limit": settings.memory_limit,
         "cpu_limit": settings.cpu_limit,
@@ -502,13 +524,7 @@ def _build_sandbox_kwargs(settings: SandboxSettings) -> dict:
 
 
 def _start_sandbox(cfg: AgentConfig, log) -> tuple[DockerSandbox, bool]:
-    """启动沙箱。返回 (sandbox, from_pool)。
-
-    ★ 本次改动：
-    - 网络、内存、CPU、镜像都从环境变量读（SandboxSettings）
-    - 默认 network=False（安全）
-    - 设置 AGENT_SANDBOX_NETWORK=true 可临时开网（信任场景）
-    """
+    """启动沙箱。"""
     settings = SandboxSettings.from_env()
     from_pool = False
 
@@ -521,9 +537,9 @@ def _start_sandbox(cfg: AgentConfig, log) -> tuple[DockerSandbox, bool]:
     )
 
     if settings.network:
-        print(
-            "[core] ⚠️  沙箱网络已开启（AGENT_SANDBOX_NETWORK=true）。"
-            "Agent 可以访问外网，仅在信任的场景使用。"
+        log.warning(
+            "sandbox_network_enabled",
+            hint="Agent 可以访问外网，仅在信任的场景使用",
         )
 
     try:
@@ -541,7 +557,6 @@ def _start_sandbox(cfg: AgentConfig, log) -> tuple[DockerSandbox, bool]:
 
 
 def _build_codebase(cfg: AgentConfig, log) -> tuple[Any, Any, Any, Any]:
-    """构建代码库分析对象。"""
     parser = CodeParser(str(cfg.project_path))
     dep_graph = DependencyGraph(parser)
     call_graph = CallGraph(parser)
@@ -562,16 +577,7 @@ def _build_codebase(cfg: AgentConfig, log) -> tuple[Any, Any, Any, Any]:
 
 
 def build_agent(cfg: AgentConfig) -> AgentRuntime:
-    """组装完整的 Coding Agent。
-
-    性能优化：
-    - 沙箱启动与代码库分析并行
-    - 评测模式（AGENT_EVAL_MODE=true）会跳过 memory / retrieval / status_bar /
-      trajectory / 用户卡片注入，最小化 token 和启动开销
-
-    沙箱：
-    - 网络 / 内存 / CPU / 镜像 通过环境变量控制（见 SandboxSettings）
-    """
+    """组装完整的 Coding Agent。"""
     from observability.logger import get_logger
 
     log = get_logger("core")
@@ -589,12 +595,11 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         eval_mode=eval_mode,
     )
 
-    # ---------- 0. LLM + checkpointer（快） ----------
+    # ---------- 0. LLM + checkpointer ----------
     llm = build_llm(cfg)
     compaction_llm = _build_compaction_llm(cfg)
     checkpointer = build_checkpointer(cfg.meta_dir)
 
-    # Memory store 首次初始化（评测模式跳过，避免加载嵌入模型）
     if not eval_mode:
         try:
             _ = get_memory_store()
@@ -610,10 +615,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         sandbox, sandbox_from_pool = sandbox_future.result()
         parser, dep_graph, call_graph, analyzer = codebase_future.result()
 
-    log.info(
-        "parallel_init_done",
-        elapsed_s=round(time.time() - t_parallel, 2),
-    )
+    log.info("parallel_init_done", elapsed_s=round(time.time() - t_parallel, 2))
 
     # ---------- 2. 状态栏 ----------
     status_bar = AgentStatusBar(mode="persistent")
@@ -642,18 +644,40 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         enable_mcp = False
 
     mcp_tools: list[Any] = []
+    mcp_server_to_tools: dict[str, list[str]] = {}
+    mcp_auto_expose: list[str] = []
+
     if enable_mcp and _MCP_AVAILABLE:
         try:
-            mcp_config = build_mcp_config(cfg.agent_home)
-            mcp_tools = _load_mcp_in_thread(mcp_config, timeout=15.0)
-            print(f"[core] MCP 工具加载成功: {len(mcp_tools)} 个")
+            mcp_config = build_mcp_config(cfg.agent_home, cfg.project_path)
+            mcp_auto_expose = list(getattr(mcp_config, "auto_expose", []) or [])
+
+            mcp_timeout = _env_float("AGENT_MCP_TIMEOUT", 60.0)
+            mcp_tools, tool_to_server = _load_mcp_in_thread_with_mapping(
+                mcp_config, timeout=mcp_timeout
+            )
+
+            mcp_server_to_tools = _aggregate_server_to_tools(
+                mcp_tools,
+                tool_to_server,
+                list(mcp_config.servers.keys()),
+            )
+
+            log.info(
+                "mcp_tools_loaded",
+                total=len(mcp_tools),
+                servers={
+                    s: len(ts) for s, ts in sorted(mcp_server_to_tools.items())
+                },
+                auto_expose=mcp_auto_expose or None,
+            )
         except Exception as e:
             log.warning("mcp_load_failed", error=str(e))
     else:
         if not _MCP_AVAILABLE:
-            print("[core] MCP 已跳过（mcp_client.client 未找到）")
+            log.info("mcp_skipped", reason="mcp_client.client 未找到")
         else:
-            print("[core] MCP 已跳过（AGENT_ENABLE_MCP=false）")
+            log.info("mcp_skipped", reason="AGENT_ENABLE_MCP=false")
 
     # ---------- 7. 工具集 ----------
     tools: list[Any] = []
@@ -696,12 +720,45 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     tools += [_sub.__dict__[n] for n in SUBAGENT_TOOLS]
 
     tools.append(create_load_skill_tool(skill_registry))
-    tools += mcp_tools
 
-    tools = sorted(tools, key=lambda t: t.name)
-    tools.append(create_tool_search_tool(tools))
+    # ---------- 7.1 MCP 元工具（渐进式披露） ----------
+    _filter_holder: dict[str, Any] = {}
 
-    validate_tools(tools, strict=cfg.strict_lint)
+    def _on_use_server(server_name: str) -> bool:
+        """mcp_use_server 元工具的回调：揭示 server。"""
+        tf = _filter_holder.get("middleware")
+        if tf is None:
+            log.warning("mcp_reveal_failed", server=server_name, reason="tool_filter 未注册")
+            return False
+        ok = tf.expose_mcp_server(server_name)
+        if not ok:
+            log.warning("mcp_reveal_failed", server=server_name, reason="未知 server")
+        else:
+            log.info("mcp_server_revealed", server=server_name)
+        return ok
+
+    if mcp_server_to_tools:
+        try:
+            from mcp_client.discovery import create_mcp_meta_tools
+
+            mcp_meta_tools = create_mcp_meta_tools(
+                server_to_tools=mcp_server_to_tools,
+                on_use_server=_on_use_server,
+            )
+            tools += mcp_meta_tools
+            log.info(
+                "mcp_meta_tools_registered",
+                servers=len(mcp_server_to_tools),
+            )
+        except ImportError as e:
+            log.warning("mcp_meta_tools_load_failed", error=str(e))
+
+    # ---------- 7.2 完整工具池（filter 会裁剪） ----------
+    all_tools_pool: list[Any] = list(tools) + list(mcp_tools)
+    all_tools_pool = sorted(all_tools_pool, key=lambda t: t.name)
+    all_tools_pool.append(create_tool_search_tool(all_tools_pool))
+
+    validate_tools(all_tools_pool, strict=cfg.strict_lint)
 
     # ---------- 8. 系统提示 ----------
     system_prompt = load_system_prompt(cfg.agent_home)
@@ -710,7 +767,6 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     if project_memory:
         system_prompt = f"{system_prompt}\n\n## Project Memory\n{project_memory}"
 
-    # 第 1 层记忆：用户卡片（全量注入）
     user_memory_enabled = _env_bool("AGENT_USER_MEMORY", "true")
     if eval_mode:
         user_memory_enabled = _env_bool("AGENT_USER_MEMORY", "false")
@@ -731,7 +787,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     # ---------- 9. 上下文装配 ----------
     assembler = ContextAssembler(
         system_prompt=system_prompt,
-        tool_definitions=render_tool_definitions(tools),
+        tool_definitions=render_tool_definitions(all_tools_pool),
         project_memory="",
     )
 
@@ -759,10 +815,8 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     metrics_store = MetricsStore(str(Path.home() / ".coding-agent" / "metrics.db"))
 
     # ---------- 12. 中间件链 ----------
-    all_tool_names = [t.name for t in tools]
     skill_tool_map = {s.name: s.tools for s in skill_registry.all_skills()}
 
-    # ★ 熔断器：只读工具阈值 20，写工具阈值 5，未知工具阈值 8
     circuit_breaker = CircuitBreakerMiddleware(
         CircuitBreakerConfig(
             read_only_max_repeats=_env_int("AGENT_CB_READ_REPEATS", 20),
@@ -773,54 +827,53 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         )
     )
 
-    # 评测模式下的开关默认值
+    # ★ tool_filter：接收 MCP server 映射 + autoExpose
+    tool_filter_mw = create_tool_filter_middleware(
+        [t.name for t in all_tools_pool],
+        skill_tool_map,
+        mcp_server_to_tools=mcp_server_to_tools,
+        auto_expose_servers=mcp_auto_expose,
+    )
+
+    # 回填给 MCP 元工具使用
+    _filter_holder["middleware"] = tool_filter_mw
+
     thinking_router_default = "false" if eval_mode else "true"
     retrieval_default = "false" if eval_mode else "true"
 
     middlewares = [
-        # 1. 条件化思考（最先跑，读原始 user 消息）
         create_thinking_router_middleware(
             provider=cfg.provider_id,
             enabled=_env_bool("AGENT_THINKING_ROUTER", thinking_router_default),
             strategy=os.getenv("AGENT_THINKING_STRATEGY", "auto"),
         ),
-        # 2. Content 剥离
         create_content_stripper_middleware(
             enabled=_env_bool("AGENT_CONTENT_STRIPPER", "true"),
         ),
-        # 3. 第 2 层记忆：检索注入
         create_retrieval_inject_middleware(
             enabled=_env_bool("AGENT_RETRIEVAL", retrieval_default),
             top_k=_env_int("AGENT_RETRIEVAL_TOP_K", 3),
         ),
-        # 4. 幂等性保护
         create_idempotency_middleware(
             enabled=_env_bool("AGENT_IDEMPOTENCY", "true"),
         ),
-        # 5. 上下文压缩
         ContextCompactionMiddleware(
             model=compaction_llm,
             workspace=str(cfg.project_path),
             config=CompactionPipelineConfig(model_window=cfg.model_window),
         ),
-        # 6. 工具过滤（按激活的 skill + search_tools 结果）
-        create_tool_filter_middleware(all_tool_names, skill_tool_map),
-        # 7. 指标采集
+        # ★ 工具过滤（含 MCP 渐进式披露）
+        tool_filter_mw,
         MetricsMiddleware(
             store=metrics_store,
             model_name=cfg.model,
             debug=False,
             on_metric=_on_metric,
         ),
-        # 8. 依赖检查
         create_dependency_check_middleware(analyzer),
-        # 9. 熔断器
         circuit_breaker,
-        # 10. 状态栏注入（评测模式跳过）
         *([] if eval_mode else [StatusBarMiddleware(status_bar)]),
-        # 11. 轨迹持久化（评测模式跳过）
         *([] if trajectory_mw is None else [trajectory_mw]),
-        # 12. 缓存标记
         create_prompt_cache_middleware(
             cache_ttl="5m",
             default_cache_key="coding-agent-v1",
@@ -831,7 +884,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     # ---------- 13. 组装 Agent ----------
     agent = create_agent(
         model=llm,
-        tools=tools,
+        tools=all_tools_pool,
         system_prompt=system_prompt,
         middleware=middlewares,
         checkpointer=checkpointer,
@@ -843,9 +896,11 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     log.info(
         "agent_build_done",
-        tools=len(tools),
-        skills=len(skill_registry.all_skills()),
+        tools_total=len(all_tools_pool),
         mcp_tools=len(mcp_tools),
+        mcp_servers=len(mcp_server_to_tools),
+        mcp_auto_expose=len(mcp_auto_expose),
+        skills=len(skill_registry.all_skills()),
         eval_mode=eval_mode,
         thinking_router=_env_bool("AGENT_THINKING_ROUTER", thinking_router_default),
         content_stripper=_env_bool("AGENT_CONTENT_STRIPPER", "true"),
@@ -865,7 +920,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         agent=agent,
         sandbox=sandbox,
         assembler=assembler,
-        tools=tools,
+        tools=all_tools_pool,
         bg_indexer=bg_indexer,
         config=cfg,
         skill_registry=skill_registry,
