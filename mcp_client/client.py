@@ -75,9 +75,7 @@ class _AsyncRunner:
 
     def __init__(self) -> None:
         self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(
-            target=self._run_loop, daemon=True, name="mcp-async-runner"
-        )
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="mcp-async-runner")
         self._thread.start()
 
     def _run_loop(self) -> None:

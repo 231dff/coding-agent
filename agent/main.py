@@ -163,15 +163,11 @@ def _boot_agent_with_status(cfg):
 def _print_ready_line(rt) -> None:
     """打印一行"已就绪"摘要。"""
     mcp_prefixes = ("mcp_", "github_", "filesystem_", "fetch_", "git_", "postgres_")
-    mcp_count = sum(
-        1 for t in rt.tools if any(t.name.startswith(p) for p in mcp_prefixes)
-    )
-    skill_count = (
-        len(rt.skill_registry.all_skills()) if rt.skill_registry else 0
-    )
+    mcp_count = sum(1 for t in rt.tools if any(t.name.startswith(p) for p in mcp_prefixes))
+    skill_count = len(rt.skill_registry.all_skills()) if rt.skill_registry else 0
 
     parts = [
-        f"[bold green]✓[/bold green] [white]已就绪[/white]",
+        "[bold green]✓[/bold green] [white]已就绪[/white]",
         f"[dim]tools={len(rt.tools)}[/dim]",
     ]
     if mcp_count:
@@ -230,9 +226,7 @@ def _build_welcome_info(project_path, rt, thread_id: str | None = None):
     info.add_row(
         "🧠",
         "模型",
-        f"[white]{cfg.provider_id}[/white]"
-        f"[dim] / [/dim]"
-        f"[bright_white]{cfg.model}[/bright_white]",
+        f"[white]{cfg.provider_id}[/white][dim] / [/dim][bright_white]{cfg.model}[/bright_white]",
     )
 
     if rt.skill_registry:
@@ -250,8 +244,7 @@ def _build_welcome_info(project_path, rt, thread_id: str | None = None):
     info.add_row(
         "💾",
         "记忆",
-        f"[white]{mem.get('backend', '?')}[/white] "
-        f"[dim]({mem.get('type', '?')})[/dim]",
+        f"[white]{mem.get('backend', '?')}[/white] [dim]({mem.get('type', '?')})[/dim]",
     )
 
     if is_enabled():

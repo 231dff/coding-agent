@@ -51,7 +51,7 @@ def create_mcp_meta_tools(
             lines.append(f"  工具名: {preview}{more}")
             lines.append("")
 
-        lines.append("提示：用 `mcp_use_server(\"<name>\")` 启用某个 server 的工具。")
+        lines.append('提示：用 `mcp_use_server("<name>")` 启用某个 server 的工具。')
         return "\n".join(lines)
 
     @tool
@@ -68,10 +68,7 @@ def create_mcp_meta_tools(
         """
         if server_name not in server_to_tools:
             available = ", ".join(server_to_tools.keys()) or "(无)"
-            return (
-                f"ERROR: 未知 server '{server_name}'。\n"
-                f"可用: {available}"
-            )
+            return f"ERROR: 未知 server '{server_name}'。\n可用: {available}"
 
         on_use_server(server_name)
         tools = server_to_tools[server_name]

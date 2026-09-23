@@ -95,6 +95,9 @@ from middleware.tool_filter import create_tool_filter_middleware
 from middleware.tool_search import create_tool_search_tool
 from middleware.trajectory import TrajectoryMiddleware
 
+# ---------- MCP ----------
+from observability.logger import get_logger
+
 # ---------- 可观测性 ----------
 from observability.trajectory_writer import TrajectoryWriter
 
@@ -127,9 +130,6 @@ from tools.test_ops import TEST_TOOLS
 from tools.test_ops import bind as bind_test
 from tools.transaction_ops import TRANSACTION_TOOLS
 from tools.transaction_ops import bind as bind_tx
-
-# ---------- MCP ----------
-from observability.logger import get_logger
 
 log = get_logger("core")
 
@@ -666,9 +666,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
             log.info(
                 "mcp_tools_loaded",
                 total=len(mcp_tools),
-                servers={
-                    s: len(ts) for s, ts in sorted(mcp_server_to_tools.items())
-                },
+                servers={s: len(ts) for s, ts in sorted(mcp_server_to_tools.items())},
                 auto_expose=mcp_auto_expose or None,
             )
         except Exception as e:
