@@ -9,7 +9,12 @@
 - 双层记忆（Cards + Retrieval）
 - LangGraph Store 后端
 - 幂等性保护（IdempotencyMiddleware）
-- ★ MCP 渐进式披露（mcp_list_servers / mcp_use_server 元工具）
+- MCP 渐进式披露（mcp_list_servers / mcp_use_server 元工具）
+- P1-1: 写操作后自动跑测试（AutoTestMiddleware）
+- P1-2: 独立 Reviewer 子 Agent（review_changes 工具）
+- P1-3: 结构化交付报告（generate_summary_report 工具）
+- P2: 持续进化闭环（经验归档 + /evolve 提案生成）
+- P3: 多 Agent 并行协作（管理者模式 + 级联终止）
 
 性能优化：
 - 沙箱启动与代码库分析并行执行
@@ -19,17 +24,6 @@
 - 幂等性中间件防止重复写操作
 - 日志脱敏（见 observability/redact.py）
 - 沙箱 release 不做任何删除（见 sandbox/pool.py）
-
-沙箱网络策略：
-- 默认断网（network=False），防止 Agent 外传代码 / 下载恶意依赖
-- AGENT_SANDBOX_NETWORK=true 临时开网
-- AGENT_SANDBOX_MEMORY / AGENT_SANDBOX_CPU 调整资源
-- AGENT_SANDBOX_IMAGE 指定自定义镜像
-
-MCP 工具策略：
-- MCP 工具**默认不暴露**给 LLM，节省 token
-- Agent 通过 mcp_list_servers / mcp_use_server 元工具按需揭示
-- autoExpose 列表里的 server 启动时立即暴露
 """
 
 from __future__ import annotations
@@ -56,16 +50,12 @@ from codebase.indexer import (
     create_index_status_tool,
     create_search_tool,
 )
-
-# ---------- 代码库分析 ----------
 from codebase.parser import CodeParser
 from codebase.repo_map import RepoMapBuilder, create_repo_map_tool
 
-# ---------- 上下文 ----------
 from context.assembly import ContextAssembler
 from context.status_bar import AgentStatusBar
 
-# ---------- 记忆 ----------
 from memory.cards import user_card_repo
 from memory.store import (
     get_store as get_memory_store,
@@ -82,8 +72,6 @@ from middleware.context_compaction import (
     CompactionPipelineConfig,
     ContextCompactionMiddleware,
 )
-
-# ---------- 中间件 ----------
 from middleware.dependency_check import create_dependency_check_middleware
 from middleware.idempotency import create_idempotency_middleware
 from middleware.metrics import MetricsMiddleware
@@ -95,25 +83,38 @@ from middleware.tool_filter import create_tool_filter_middleware
 from middleware.tool_search import create_tool_search_tool
 from middleware.trajectory import TrajectoryMiddleware
 
-# ---------- MCP ----------
-from observability.logger import get_logger
+# P1-1: 自动测试中间件
+from middleware.auto_test import AutoTestMiddleware
 
-# ---------- 可观测性 ----------
+# P1-2: Reviewer 子 Agent
+from agent.reviewer import Reviewer
+from tools.review_ops import REVIEW_TOOLS
+from tools.review_ops import bind as bind_review
+
+# P1-3: 结构化交付报告
+from tools.report_ops import REPORT_TOOLS
+from tools.report_ops import bind as bind_report
+
+# P2: 经验归档
+from agent.evolution.store import EvolutionStore, set_store
+
+# ★ P3: 并行执行器
+from agent.parallel import ParallelExecutor, set_executor
+from tools.parallel_ops import PARALLEL_TOOLS
+
+from observability.logger import get_logger
 from observability.trajectory_writer import TrajectoryWriter
 
-# ---------- 沙箱 ----------
 from sandbox.docker_backend import DockerSandbox
 from sandbox.patch import create_apply_patch_tool
 from sandbox.pool import SandboxPool
 from skills.loader import create_load_skill_tool
 
-# ---------- 技能 ----------
 from skills.registry import SkillRegistry
 from tools.context_ops import CONTEXT_TOOLS
 from tools.context_ops import bind as bind_context
 from tools.lint import validate_tools
 
-# ---------- 工具 ----------
 from tools.registry import build_default_tools
 from tools.sandbox_ops import SANDBOX_TOOLS
 from tools.sandbox_ops import bind as bind_sandbox
@@ -218,7 +219,6 @@ def _get_sandbox_pool() -> SandboxPool:
 
 
 def load_system_prompt(agent_home: Path) -> str:
-    """加载系统提示词。"""
     if _is_eval_mode():
         minimal = agent_home / "prompts" / "system_minimal.md"
         if minimal.exists():
@@ -231,7 +231,6 @@ def load_system_prompt(agent_home: Path) -> str:
 
 
 def load_project_memory(project_path: Path) -> str:
-    """加载项目记忆。"""
     if _is_eval_mode():
         return ""
     for name in ("AGENTS.md", "CLAUDE.md", "CODING_AGENT.md"):
@@ -242,7 +241,6 @@ def load_project_memory(project_path: Path) -> str:
 
 
 def render_tool_definitions(tools: list[Any]) -> str:
-    """渲染工具定义为稳定文本。"""
     lines = []
     for t in sorted(tools, key=lambda x: x.name):
         desc = (t.description or "").split("\n", 1)[0].strip()
@@ -256,16 +254,6 @@ def render_tool_definitions(tools: list[Any]) -> str:
 
 
 def build_mcp_config(agent_home: Path, project_path: Path | None = None):
-    """构建 MCP 配置。
-
-    从以下位置读取（优先级从高到低）：
-    1. <project>/.coding-agent/mcp.json
-    2. ~/.coding-agent/mcp.json
-    3. 内置 git / web server（AGENT_MCP_INCLUDE_BUILTIN=true）
-
-    兼容 Claude Desktop / Cursor 的 mcpServers 格式。
-    支持顶层 autoExpose 字段。
-    """
     if not _MCP_AVAILABLE:
         raise RuntimeError("MCP 不可用（mcp_client.client 导入失败）")
 
@@ -283,12 +271,6 @@ def build_mcp_config(agent_home: Path, project_path: Path | None = None):
 def _load_mcp_in_thread_with_mapping(
     config, timeout: float = 60.0
 ) -> tuple[list[Any], dict[str, str]]:
-    """在独立线程里加载 MCP，返回 (tools, tool_to_server)。
-
-    Returns:
-        - tools: MCP 工具列表
-        - tool_to_server: 工具名 → server 名
-    """
     if load_mcp_tools_sync is None:
         return [], {}
 
@@ -312,16 +294,11 @@ def _aggregate_server_to_tools(
     tool_to_server: dict[str, str],
     configured_servers: list[str],
 ) -> dict[str, list[str]]:
-    """把 tool_to_server 反向聚合为 server → [tool_name]。
-
-    对没有映射的工具，按前缀兜底匹配。
-    """
     server_to_tools: dict[str, list[str]] = {}
 
     for tool_name, server in tool_to_server.items():
         server_to_tools.setdefault(server, []).append(tool_name)
 
-    # 兜底：按前缀猜
     for t in mcp_tools:
         if t.name in tool_to_server:
             continue
@@ -339,7 +316,6 @@ def _aggregate_server_to_tools(
 
 
 def build_llm(cfg: AgentConfig):
-    """初始化 LLM。"""
     if cfg.model_provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
@@ -389,18 +365,39 @@ def build_llm(cfg: AgentConfig):
 
 
 def _build_compaction_llm(cfg: AgentConfig):
-    """压缩用轻量模型。"""
     cheap_model = os.getenv("AGENT_COMPACTION_MODEL", "")
     if not cheap_model:
         return build_llm(cfg)
 
-    from copy import replace
+    # 浅拷贝 + 覆盖 model（不依赖 dataclasses，兼容 pydantic / 自定义类）
+    import copy as _copy
 
     try:
-        cheap_cfg = replace(cfg, model=cheap_model)
-        return build_llm(cheap_cfg)
+        cheap_cfg = _copy.copy(cfg)
+        cheap_cfg.model = cheap_model
     except Exception:
         return build_llm(cfg)
+
+    return build_llm(cheap_cfg)
+
+
+# P1-2: Reviewer 用 LLM
+def _build_reviewer_llm(cfg: AgentConfig):
+    """Reviewer 用 LLM。优先 AGENT_REVIEWER_MODEL，否则复用主模型。"""
+    reviewer_model = os.getenv("AGENT_REVIEWER_MODEL", "")
+    if not reviewer_model:
+        return build_llm(cfg)
+
+    import copy as _copy
+
+    try:
+        reviewer_cfg = _copy.copy(cfg)
+        reviewer_cfg.model = reviewer_model
+        reviewer_cfg.timeout = int(os.getenv("AGENT_REVIEWER_TIMEOUT", "45"))
+    except Exception:
+        return build_llm(cfg)
+
+    return build_llm(reviewer_cfg)
 
 
 # ============================================================
@@ -425,6 +422,10 @@ class AgentRuntime:
     metrics_queue: Any = None
     checkpointer: Any = None
     sandbox_from_pool: bool = False
+    # P2: 经验归档存储
+    evolution_store: Any = None
+    # ★ P3: 并行执行器
+    parallel_executor: Any = None
 
     _planning_graph: Any = field(default=None, init=False, repr=False)
     _repair_graph: Any = field(default=None, init=False, repr=False)
@@ -524,7 +525,6 @@ def _build_sandbox_kwargs(settings: SandboxSettings) -> dict:
 
 
 def _start_sandbox(cfg: AgentConfig, log) -> tuple[DockerSandbox, bool]:
-    """启动沙箱。"""
     settings = SandboxSettings.from_env()
     from_pool = False
 
@@ -629,6 +629,31 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     bind_subagent(str(cfg.project_path), cfg.model)
     bind_graphs(call_graph)
 
+    # P1-2: Reviewer 初始化 + 绑定
+    reviewer_llm = _build_reviewer_llm(cfg)
+    reviewer = Reviewer(reviewer_llm)
+    bind_review(sandbox, reviewer)
+    log.info(
+        "reviewer_ready",
+        model=os.getenv("AGENT_REVIEWER_MODEL", cfg.model),
+    )
+
+    # P1-3: 报告工具绑定
+    report_dir = cfg.meta_dir / "reports"
+    bind_report(sandbox, report_dir)
+    log.info("report_bind_ready", dir=str(report_dir))
+
+    # P2: 经验归档存储
+    evolution_store = EvolutionStore(cfg.meta_dir / "evolution")
+    set_store(evolution_store)
+    log.info(
+        "evolution_store_ready",
+        path=str(evolution_store.experiences_path),
+    )
+
+    # ★ P3: 并行执行器占位（等工具池构造完再实际创建）
+    parallel_executor_holder: dict[str, Any] = {}
+
     # ---------- 4. 后台索引 ----------
     indexer = CodeIndexer(parser, persist_dir=str(cfg.index_dir))
     bg_indexer = BackgroundIndexer(parser, indexer)
@@ -717,13 +742,27 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     tools += [_sub.__dict__[n] for n in SUBAGENT_TOOLS]
 
+    # P1-2: Reviewer 工具
+    from tools import review_ops as _rv
+
+    tools += [_rv.__dict__[n] for n in REVIEW_TOOLS]
+
+    # P1-3: 报告工具
+    from tools import report_ops as _rp
+
+    tools += [_rp.__dict__[n] for n in REPORT_TOOLS]
+
+    # ★ P3: 并行 Worker 工具
+    from tools import parallel_ops as _par
+
+    tools += [_par.__dict__[n] for n in PARALLEL_TOOLS]
+
     tools.append(create_load_skill_tool(skill_registry))
 
     # ---------- 7.1 MCP 元工具（渐进式披露） ----------
     _filter_holder: dict[str, Any] = {}
 
     def _on_use_server(server_name: str) -> bool:
-        """mcp_use_server 元工具的回调：揭示 server。"""
         tf = _filter_holder.get("middleware")
         if tf is None:
             log.warning("mcp_reveal_failed", server=server_name, reason="tool_filter 未注册")
@@ -751,7 +790,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         except ImportError as e:
             log.warning("mcp_meta_tools_load_failed", error=str(e))
 
-    # ---------- 7.2 完整工具池（filter 会裁剪） ----------
+    # ---------- 7.2 完整工具池 ----------
     all_tools_pool: list[Any] = list(tools) + list(mcp_tools)
     all_tools_pool = sorted(all_tools_pool, key=lambda t: t.name)
     all_tools_pool.append(create_tool_search_tool(all_tools_pool))
@@ -793,11 +832,21 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     trajectory_writer: TrajectoryWriter | None = None
     trajectory_mw: TrajectoryMiddleware | None = None
     if not eval_mode:
+        from datetime import datetime
+
+        session_id = (
+            f"session-{datetime.now():%Y%m%d-%H%M%S}-{os.getpid() & 0xFFFF:04x}"
+        )
         trajectory_writer = TrajectoryWriter(
-            session_id=f"session-{id(cfg) & 0xFFFFFF:x}",
+            session_id=session_id,
             base_dir=str(cfg.trajectory_dir),
         )
         trajectory_mw = TrajectoryMiddleware(trajectory_writer)
+        log.info(
+            "trajectory_writer_ready",
+            session_id=session_id,
+            path=str(trajectory_writer.path),
+        )
 
     # ---------- 11. 指标队列 ----------
     metrics_queue: "queue.Queue[dict]" = queue.Queue(maxsize=2000)
@@ -825,7 +874,6 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         )
     )
 
-    # ★ tool_filter：接收 MCP server 映射 + autoExpose
     tool_filter_mw = create_tool_filter_middleware(
         [t.name for t in all_tools_pool],
         skill_tool_map,
@@ -833,8 +881,16 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         auto_expose_servers=mcp_auto_expose,
     )
 
-    # 回填给 MCP 元工具使用
     _filter_holder["middleware"] = tool_filter_mw
+
+    # P1-1: 自动测试
+    auto_test_mw = AutoTestMiddleware(
+        test_command=os.getenv(
+            "AGENT_AUTO_TEST_COMMAND", "pytest tests/ -v --tb=short"
+        ),
+        enabled=_env_bool("AGENT_AUTO_TEST", "true"),
+        cooldown_s=_env_float("AGENT_AUTO_TEST_COOLDOWN", 3.0),
+    )
 
     thinking_router_default = "false" if eval_mode else "true"
     retrieval_default = "false" if eval_mode else "true"
@@ -860,7 +916,6 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
             workspace=str(cfg.project_path),
             config=CompactionPipelineConfig(model_window=cfg.model_window),
         ),
-        # ★ 工具过滤（含 MCP 渐进式披露）
         tool_filter_mw,
         MetricsMiddleware(
             store=metrics_store,
@@ -871,6 +926,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         create_dependency_check_middleware(analyzer),
         circuit_breaker,
         *([] if eval_mode else [StatusBarMiddleware(status_bar)]),
+        auto_test_mw,
         *([] if trajectory_mw is None else [trajectory_mw]),
         create_prompt_cache_middleware(
             cache_ttl="5m",
@@ -887,6 +943,40 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         middleware=middlewares,
         checkpointer=checkpointer,
     )
+
+    # ---------- 13.1 P1-1: 注入 run_tests 到 auto_test_mw ----------
+    try:
+        run_tests_tool = next(
+            (t for t in all_tools_pool if t.name == "run_tests"), None
+        )
+        if run_tests_tool is not None:
+            auto_test_mw.bind_run_tests_tool(run_tests_tool)
+            log.info("auto_test_mw_bound", tool="run_tests")
+        else:
+            log.warning("auto_test_mw_bind_failed", reason="run_tests 未找到")
+    except Exception as e:
+        log.warning("auto_test_mw_bind_failed", error=str(e))
+
+    # ---------- 13.2 ★ P3: 创建并行执行器 ----------
+    parallel_executor: ParallelExecutor | None = None
+    try:
+        parallel_executor = ParallelExecutor(
+            llm=llm,
+            sandbox=sandbox,
+            base_dir=cfg.meta_dir / "parallel",
+            tools=all_tools_pool,
+            max_workers=_env_int("AGENT_PARALLEL_MAX_WORKERS", 3),
+            max_iterations=_env_int("AGENT_PARALLEL_MAX_ITER", 15),
+        )
+        set_executor(parallel_executor)
+        parallel_executor_holder["executor"] = parallel_executor
+        log.info(
+            "parallel_executor_ready",
+            max_workers=parallel_executor.max_workers,
+            shared_dir=str(parallel_executor.shared_dir),
+        )
+    except Exception as e:
+        log.warning("parallel_executor_failed", error=str(e))
 
     # ---------- 14. 日志 ----------
     backend_info = store_backend_info()
@@ -910,6 +1000,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         sandbox_network=sandbox_settings.network,
         sandbox_memory=sandbox_settings.memory_limit,
         checkpoint_db=str(cfg.meta_dir / "sessions" / "checkpoints.db"),
+        parallel_executor=parallel_executor is not None,
         elapsed_s=round(time.time() - t0, 2),
     )
 
@@ -928,4 +1019,6 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         metrics_queue=metrics_queue,
         checkpointer=checkpointer,
         sandbox_from_pool=sandbox_from_pool,
+        evolution_store=evolution_store,
+        parallel_executor=parallel_executor,
     )

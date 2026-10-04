@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import shlex
 import tarfile
 import time
 from pathlib import Path
@@ -94,6 +95,9 @@ class DockerSandbox(Sandbox):
                 pass
             self.container = None
 
+    # ============================================================
+    # ★ 核心修改：exec 方法
+    # ============================================================
     def exec(
         self,
         command: str,
@@ -105,16 +109,24 @@ class DockerSandbox(Sandbox):
             raise RuntimeError("沙箱未启动，请先调用 start()")
 
         start = time.time()
-
-        # 合并 cwd/env：显式传入 > 会话记忆
         eff_cwd = cwd or self._cwd
         eff_env = {**self._env, **(env or {})}
 
-        # 处理 cd 命令：如果命令是 cd 开头，更新记忆
+        # ---------- ★ 严格判定「纯 cd / 纯 export」----------
+        # 旧逻辑：stripped.startswith("cd ") and "&&" not in stripped
+        #   问题：`cd /tmp 2>/dev/null || cd .; python ...` 会通过检查
+        #   后果：整条命令被误当成路径，污染 self._cwd，后续 exec 全挂
+        #
+        # 新逻辑：shlex 分词 + 严格 token 数量 + 拒绝 shell 元字符
         stripped = command.strip()
-        if stripped.startswith("cd ") and "&&" not in stripped:
-            target = stripped[3:].strip()
-            self._cwd = self._resolve_cwd(eff_cwd, target)
+        tokens = self._safe_split(stripped)
+
+        if (
+            len(tokens) == 2
+            and tokens[0] == "cd"
+            and not self._has_shell_meta(tokens[1])
+        ):
+            self._cwd = self._resolve_cwd(eff_cwd, tokens[1])
             return ExecResult(
                 exit_code=0,
                 stdout="",
@@ -122,12 +134,14 @@ class DockerSandbox(Sandbox):
                 duration_s=time.time() - start,
             )
 
-        # 处理 export 命令
-        if stripped.startswith("export ") and "&&" not in stripped:
-            kv = stripped[len("export ") :].strip()
-            if "=" in kv:
-                k, v = kv.split("=", 1)
-                self._env[k.strip()] = v.strip().strip("'\"")
+        if (
+            len(tokens) == 2
+            and tokens[0] == "export"
+            and "=" in tokens[1]
+            and not self._has_shell_meta(tokens[1])
+        ):
+            k, v = tokens[1].split("=", 1)
+            self._env[k.strip()] = v.strip().strip("'\"")
             return ExecResult(
                 exit_code=0,
                 stdout="",
@@ -135,6 +149,7 @@ class DockerSandbox(Sandbox):
                 duration_s=time.time() - start,
             )
 
+        # ---------- 正常执行 ----------
         try:
             exit_code, output = self.container.exec_run(
                 cmd=["sh", "-c", command],
@@ -166,8 +181,13 @@ class DockerSandbox(Sandbox):
             stdout = stdout[: MAX_BYTES // 2]
             stderr = stderr[: MAX_BYTES // 2]
 
+        # ★ 修：区分 None 与 0
+        # 旧逻辑：exit_code or 0  → exit_code=None 时变成 0（把"未知"当"成功"）
+        # 新逻辑：None → -1，明确表示"未拿到退出码"
+        effective_exit = exit_code if exit_code is not None else -1
+
         return ExecResult(
-            exit_code=exit_code or 0,
+            exit_code=effective_exit,
             stdout=stdout,
             stderr=stderr,
             duration_s=duration,
@@ -175,8 +195,30 @@ class DockerSandbox(Sandbox):
             full_output_path=full_path,
         )
 
+    # ============================================================
+    # ★ 新增：两个辅助方法
+    # ============================================================
+    @staticmethod
+    def _safe_split(cmd: str) -> list[str]:
+        """shlex 分词，失败时返回空列表（保守：不识别为纯 cd/export）。"""
+        try:
+            return shlex.split(cmd)
+        except ValueError:
+            return []
+
+    @staticmethod
+    def _has_shell_meta(s: str) -> bool:
+        """第二个 token 是否含 shell 元字符——含则不是纯路径。"""
+        return any(c in s for c in "|&;<>()$`\\\"'*?[]{}")
+
     @staticmethod
     def _resolve_cwd(base: str, target: str) -> str:
+        # ★ 增加防御：如果 base 已经被污染（含空格或元字符），回退到 /workspace
+        if " " in base or DockerSandbox._has_shell_meta(base):
+            base = "/workspace"
+        # ★ 拒绝含元字符的 target（虽然上游已经过滤，这里做第二道防线）
+        if DockerSandbox._has_shell_meta(target):
+            return base
         if target.startswith("/"):
             return target
         if target == "..":

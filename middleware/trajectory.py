@@ -1,6 +1,8 @@
 """轨迹持久化中间件（异步写）。
 
-关键改动：TrajectoryWriter 用后台队列，工具调用前后不再同步 I/O。
+LangChain 1.4 稳定的 hook：
+  wrap_model_call  — 每次 LLM 调用前，记录最后一条消息
+  wrap_tool_call   — 每次工具调用前后，记录 tool_call + tool_result
 """
 
 from __future__ import annotations
@@ -18,16 +20,20 @@ class TrajectoryMiddleware(AgentMiddleware):
         self.writer = writer
         self._last_message_fingerprint: str = ""
 
-    # ---------- 同步 ----------
+    # ---------- wrap_model_call（同步 + 异步）----------
 
-    def modify_model_request(self, request, model):
+    def wrap_model_call(self, request, handler):
         self._record_last_message(request)
-        return request
+        return handler(request)
+
+    async def awrap_model_call(self, request, handler):
+        self._record_last_message(request)
+        return await handler(request)
+
+    # ---------- wrap_tool_call（同步 + 异步）----------
 
     def wrap_tool_call(self, request, handler):
-        tool_call = getattr(request, "tool_call", None) or (
-            request.get("tool_call") if hasattr(request, "get") else None
-        )
+        tool_call = getattr(request, "tool_call", None)
         if tool_call:
             self.writer.append(
                 "tool_call",
@@ -60,16 +66,8 @@ class TrajectoryMiddleware(AgentMiddleware):
                 )
             raise
 
-    # ---------- 异步 ----------
-
-    async def amodify_model_request(self, request, model):
-        self._record_last_message(request)
-        return request
-
     async def awrap_tool_call(self, request, handler):
-        tool_call = getattr(request, "tool_call", None) or (
-            request.get("tool_call") if hasattr(request, "get") else None
-        )
+        tool_call = getattr(request, "tool_call", None)
         if tool_call:
             self.writer.append(
                 "tool_call",
@@ -105,7 +103,7 @@ class TrajectoryMiddleware(AgentMiddleware):
     # ---------- 内部 ----------
 
     def _record_last_message(self, request) -> None:
-        messages = request.messages or []
+        messages = getattr(request, "messages", None) or []
         if not messages:
             return
         last = messages[-1]

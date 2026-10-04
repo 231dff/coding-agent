@@ -178,6 +178,7 @@ include = [
     "perf*",
     "evals*",
     "api*",
+    "verification*",
 ]
 exclude = [
     "tests*",

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from langchain.tools import tool
 
-from sandbox.base import Sandbox
+from sandbox.base import ExecResult, Sandbox
 from sandbox.shell import ShellManager
 
 # 全局绑定，由 registry 在初始化时注入
@@ -27,6 +27,34 @@ def _require() -> tuple[Sandbox, ShellManager]:
     return _SANDBOX, _SHELL
 
 
+# ============================================================
+# ★ 新增：工具层异常
+# ============================================================
+class SandboxToolError(Exception):
+    """沙箱工具失败时抛出。消息体里保留完整输出，便于 Agent 看到细节。"""
+
+    def __init__(self, tool_name: str, exit_code: int, text: str):
+        self.tool_name = tool_name
+        self.exit_code = exit_code
+        self.text = text
+        super().__init__(f"[{tool_name}] exit={exit_code}\n{text}")
+
+
+def _raise_if_failed(tool_name: str, result: ExecResult) -> None:
+    """
+    统一失败判定：
+      - exit_code == 0  → 正常返回
+      - exit_code != 0  → 抛 SandboxToolError
+    注意：不再用 `result.exit_code or 0`，None 已由 backend 归一为 -1。
+    """
+    if result.exit_code != 0:
+        raise SandboxToolError(
+            tool_name=tool_name,
+            exit_code=result.exit_code,
+            text=result.to_text(),
+        )
+
+
 @tool
 def execute(command: str, timeout: int = 60) -> str:
     """在沙箱内执行 shell 命令。工作目录和环境变量跨调用保持。
@@ -39,6 +67,7 @@ def execute(command: str, timeout: int = 60) -> str:
     """
     _, shell = _require()
     result = shell.execute(command, timeout=timeout)
+    _raise_if_failed("execute", result)   # ★ 失败时抛异常
     return result.to_text()
 
 
@@ -53,7 +82,13 @@ def sandbox_read(path: str) -> str:
     try:
         content = sandbox.read_file(path)
     except FileNotFoundError as e:
-        return f"ERROR: {e}"
+        # ★ 改成抛异常，让 middleware 写 success=false
+        raise SandboxToolError(
+            tool_name="sandbox_read",
+            exit_code=2,
+            text=f"ERROR: {e}",
+        ) from e
+
     if len(content) > 20000:
         return content[:20000] + f"\n... (truncated, {len(content)} chars total)"
     return content
@@ -70,9 +105,14 @@ def sandbox_write(path: str, content: str) -> str:
     sandbox, _ = _require()
     try:
         sandbox.write_file(path, content)
-        return f"OK: 已写入 {path}"
     except OSError as e:
-        return f"ERROR: {e}"
+        # ★ 改成抛异常
+        raise SandboxToolError(
+            tool_name="sandbox_write",
+            exit_code=3,
+            text=f"ERROR: 写入失败: {e}",
+        ) from e
+    return f"OK: 已写入 {path}"
 
 
 # 沙箱内 ripgrep 封装，比 Python 版快 10-50 倍
@@ -86,15 +126,22 @@ def sandbox_grep(pattern: str, path: str = ".", context: int = 2) -> str:
         context: 上下文行数。
     """
     _, shell = _require()
-    # 使用 ripgrep，--no-heading 让输出更紧凑
     cmd = (
         f"rg --no-heading -n -C {context} "
         f"-g '!*.pyc' -g '!.git/*' -g '!node_modules/*' "
         f"{_shell_quote(pattern)} {_shell_quote(path)} | head -n 300"
     )
     result = shell.execute(cmd, timeout=30)
+
+    # ripgrep 的退出码约定：
+    #   0 = 有匹配
+    #   1 = 无匹配（不是错误）
+    #   2+ = 真错误
     if result.exit_code == 1:
         return f"未找到匹配 '{pattern}' 的内容"
+    if result.exit_code not in (0, 1):
+        _raise_if_failed("sandbox_grep", result)
+
     return result.to_text()
 
 
