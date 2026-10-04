@@ -4,8 +4,11 @@ from .process_verifier import ProcessVerifier
 from .quality_verifier import QualityVerifier
 from .result_verifier import ResultVerifier
 from .schema import (
-    DimensionResult, Evidence, Severity,
-    TrajectoryDiagnosis, Verdict,
+    DimensionResult,
+    Evidence,
+    Severity,
+    TrajectoryDiagnosis,
+    Verdict,
 )
 
 __all__ = [

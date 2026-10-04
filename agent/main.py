@@ -706,12 +706,12 @@ def _archive_experience(rt, thread_id: str, task: str) -> None:
             并调用 flush_now() 确保所有事件落盘。
     """
     try:
-        import time as _time
         import json as _json
+        import time as _time
 
+        from agent.evolution.store import ExperienceRecord, get_store
         from verification import TrajectoryVerifier, load_events
         from verification.schema import Verdict
-        from agent.evolution.store import ExperienceRecord, get_store
 
         tw = getattr(rt, "trajectory_writer", None)
         if tw is None:
@@ -1174,6 +1174,8 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
             args = parts[1:]
 
             try:
+                import time as _time
+
                 from agent.eval import (
                     EvalDataset,
                     EvalRunner,
@@ -1183,7 +1185,6 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                 )
                 from agent.eval.reporter import save_report
                 from agent.eval.schema import EvalReport
-                import time as _time
 
                 eval_root = rt.config.meta_dir / "eval"
                 dataset = EvalDataset(eval_root)

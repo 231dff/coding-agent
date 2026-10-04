@@ -1,6 +1,6 @@
 """用法: python scripts/demo_verify.py <jsonl-path-or-glob>"""
-import sys
 import glob
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

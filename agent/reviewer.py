@@ -13,7 +13,6 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-
 REVIEWER_SYSTEM_PROMPT = """你是一个独立的代码审查员。你的职责是基于**已发生的事实**独立判断本次改动是否合格。
 
 **你只能基于输入中的证据判断，不能臆测。** 输入中包含：

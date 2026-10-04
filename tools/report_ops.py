@@ -15,8 +15,6 @@
 from __future__ import annotations
 
 import json
-import re
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -74,7 +72,7 @@ def generate_summary_report(
 
     # ---------- 组装 Markdown ----------
     lines = [
-        f"# 任务交付报告",
+        "# 任务交付报告",
         "",
         f"**时间**: {now:%Y-%m-%d %H:%M:%S}",
         "",
@@ -187,7 +185,7 @@ def _format_review(reviewer_verdict: str) -> str:
                     lines.append(f"  - `[{sev}]` {desc}")
             suggestions = data.get("suggestions", [])
             if suggestions:
-                lines.append(f"- **建议**:")
+                lines.append("- **建议**:")
                 for s in suggestions[:3]:
                     lines.append(f"  - {s}")
             return "\n".join(lines)

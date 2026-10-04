@@ -41,6 +41,15 @@ from langchain.agents import create_agent
 
 from agent.checkpointer import build_checkpointer
 from agent.config import AgentConfig
+
+# P2: 经验归档
+from agent.evolution.store import EvolutionStore, set_store
+
+# ★ P3: 并行执行器
+from agent.parallel import ParallelExecutor, set_executor
+
+# P1-2: Reviewer 子 Agent
+from agent.reviewer import Reviewer
 from codebase.background_indexer import BackgroundIndexer
 from codebase.call_graph import CallGraph, create_call_tools
 from codebase.dep_graph import DependencyGraph, create_dep_tools
@@ -52,10 +61,8 @@ from codebase.indexer import (
 )
 from codebase.parser import CodeParser
 from codebase.repo_map import RepoMapBuilder, create_repo_map_tool
-
 from context.assembly import ContextAssembler
 from context.status_bar import AgentStatusBar
-
 from memory.cards import user_card_repo
 from memory.store import (
     get_store as get_memory_store,
@@ -63,6 +70,9 @@ from memory.store import (
 from memory.store import (
     store_backend_info,
 )
+
+# P1-1: 自动测试中间件
+from middleware.auto_test import AutoTestMiddleware
 from middleware.circuit_breaker import (
     CircuitBreakerConfig,
     CircuitBreakerMiddleware,
@@ -82,40 +92,24 @@ from middleware.thinking_router import create_thinking_router_middleware
 from middleware.tool_filter import create_tool_filter_middleware
 from middleware.tool_search import create_tool_search_tool
 from middleware.trajectory import TrajectoryMiddleware
-
-# P1-1: 自动测试中间件
-from middleware.auto_test import AutoTestMiddleware
-
-# P1-2: Reviewer 子 Agent
-from agent.reviewer import Reviewer
-from tools.review_ops import REVIEW_TOOLS
-from tools.review_ops import bind as bind_review
-
-# P1-3: 结构化交付报告
-from tools.report_ops import REPORT_TOOLS
-from tools.report_ops import bind as bind_report
-
-# P2: 经验归档
-from agent.evolution.store import EvolutionStore, set_store
-
-# ★ P3: 并行执行器
-from agent.parallel import ParallelExecutor, set_executor
-from tools.parallel_ops import PARALLEL_TOOLS
-
 from observability.logger import get_logger
 from observability.trajectory_writer import TrajectoryWriter
-
 from sandbox.docker_backend import DockerSandbox
 from sandbox.patch import create_apply_patch_tool
 from sandbox.pool import SandboxPool
 from skills.loader import create_load_skill_tool
-
 from skills.registry import SkillRegistry
 from tools.context_ops import CONTEXT_TOOLS
 from tools.context_ops import bind as bind_context
 from tools.lint import validate_tools
-
+from tools.parallel_ops import PARALLEL_TOOLS
 from tools.registry import build_default_tools
+
+# P1-3: 结构化交付报告
+from tools.report_ops import REPORT_TOOLS
+from tools.report_ops import bind as bind_report
+from tools.review_ops import REVIEW_TOOLS
+from tools.review_ops import bind as bind_review
 from tools.sandbox_ops import SANDBOX_TOOLS
 from tools.sandbox_ops import bind as bind_sandbox
 from tools.status_ops import STATUS_TOOLS

@@ -8,6 +8,7 @@
 
 设计约束：
   - Worker 不共享主 Agent 轨迹（避免上下文污染）
+  - 每个 Worker 用独立 thread_id（独立 checkpointer 状态）
   - Worker 的中间产物落在 shared/ 目录
   - Worker 的最终结果是 JSON 摘要，不是全量轨迹
 """
@@ -19,13 +20,12 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, SystemMessage
-
+from langchain_core.messages import HumanMessage
 
 WORKER_SYSTEM_PROMPT = """你是一个并行 Worker，负责独立完成一个具体子任务。
 
@@ -103,7 +103,10 @@ class ParallelExecutor:
         if stop_flag.exists():
             stop_flag.unlink()
 
-        print(f"[parallel] 启动 {len(tasks)} 个 Worker（max_workers={self.max_workers}）", flush=True)
+        print(
+            f"[parallel] 启动 {len(tasks)} 个 Worker（max_workers={self.max_workers}）",
+            flush=True,
+        )
 
         try:
             with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
@@ -131,7 +134,9 @@ class ParallelExecutor:
         finally:
             self._active = False
 
-        return [self._results.get(t.task_id) for t in tasks if t.task_id in self._results]
+        return [
+            self._results.get(t.task_id) for t in tasks if t.task_id in self._results
+        ]
 
     def request_stop(self) -> None:
         """外部请求停止所有 Worker。"""
@@ -149,6 +154,7 @@ class ParallelExecutor:
 
     def _run_worker(self, task: WorkerTask) -> WorkerResult:
         t0 = time.time()
+        # ★ 独立 thread_id：每个 Worker 有独立的 checkpointer 状态
         session_id = f"worker-{task.task_id}-{uuid.uuid4().hex[:6]}"
 
         progress_file = self.shared_dir / f"progress-{task.task_id}.md"
@@ -158,7 +164,8 @@ class ParallelExecutor:
         # 初始化进度
         progress_file.write_text(
             f"# Worker {task.task_id}\n\n子任务: {task.description}\n\n"
-            f"状态: 启动中\n启动时间: {time.strftime('%H:%M:%S')}\n",
+            f"状态: 启动中\n启动时间: {time.strftime('%H:%M:%S')}\n"
+            f"thread_id: {session_id}\n",
             encoding="utf-8",
         )
 
@@ -172,7 +179,7 @@ class ParallelExecutor:
         # 用受限的工具集（避免 Worker 再次 spawn）
         worker_tools = self._filter_worker_tools()
 
-        print(f"[parallel] Worker {task.task_id} 启动", flush=True)
+        print(f"[parallel] Worker {task.task_id} 启动 (tid={session_id})", flush=True)
 
         try:
             worker_agent = create_agent(
@@ -181,7 +188,6 @@ class ParallelExecutor:
                 system_prompt=worker_prompt,
             )
 
-            # 给 Worker 一个明确的任务消息
             invoke_messages = [
                 HumanMessage(
                     content=(
@@ -198,7 +204,10 @@ class ParallelExecutor:
             tool_calls = 0
             for step in range(self.max_iterations):
                 if self._stop_event.is_set():
-                    print(f"[parallel] Worker {task.task_id} 收到停止信号", flush=True)
+                    print(
+                        f"[parallel] Worker {task.task_id} 收到停止信号",
+                        flush=True,
+                    )
                     self._append_progress(progress_file, "收到停止信号，优雅退出")
                     break
 
@@ -207,16 +216,21 @@ class ParallelExecutor:
                         f"[parallel] Worker {task.task_id} 检测到 _STOP 文件，退出",
                         flush=True,
                     )
-                    self._append_progress(progress_file, "检测到其他 Worker 已成功")
+                    self._append_progress(
+                        progress_file, "检测到其他 Worker 已成功"
+                    )
                     break
 
+                # ★ 传入 thread_id，让 checkpointer 状态隔离
                 result = worker_agent.invoke(
                     {"messages": invoke_messages},
-                    config={"recursion_limit": 20},
+                    config={
+                        "configurable": {"thread_id": session_id},
+                        "recursion_limit": 20,
+                    },
                 )
                 new_messages = result.get("messages", [])
 
-                # 判断是否已完成（最后一条是 AI 消息，没有 tool_calls）
                 last = new_messages[-1] if new_messages else None
                 if last is not None and not getattr(last, "tool_calls", None):
                     tool_calls += sum(
@@ -245,7 +259,6 @@ class ParallelExecutor:
                 except json.JSONDecodeError:
                     pass
 
-            # 没写结果文件 → 视为未完成
             return WorkerResult(
                 task_id=task.task_id,
                 success=False,

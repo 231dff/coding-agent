@@ -13,7 +13,7 @@ import json
 
 from langchain.tools import tool
 
-from agent.parallel import ParallelExecutor, WorkerTask, get_executor
+from agent.parallel import WorkerTask, get_executor
 
 
 @tool

@@ -17,7 +17,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from .store import ExperienceRecord
 
-
 AGGREGATOR_SYSTEM_PROMPT = """你是一个经验分析师。你的任务是分析多轮 Agent 运行记录，找出：
 1. **反复出现的失败模式**——同一个问题在多条轨迹里出现
 2. **反复出现的好模式**——同一类成功经验
