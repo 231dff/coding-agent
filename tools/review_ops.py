@@ -18,7 +18,7 @@ from langchain.tools import tool
 from sandbox.base import Sandbox
 
 _SANDBOX: Sandbox | None = None
-_REVIEWER = None   # agent.reviewer.Reviewer 实例
+_REVIEWER = None  # agent.reviewer.Reviewer 实例
 
 
 def bind(sandbox: Sandbox, reviewer) -> None:

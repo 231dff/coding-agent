@@ -110,9 +110,7 @@ class ParallelExecutor:
 
         try:
             with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
-                futures = {
-                    ex.submit(self._run_worker, t): t for t in tasks
-                }
+                futures = {ex.submit(self._run_worker, t): t for t in tasks}
                 for fut in as_completed(futures):
                     task = futures[fut]
                     try:
@@ -134,9 +132,7 @@ class ParallelExecutor:
         finally:
             self._active = False
 
-        return [
-            self._results.get(t.task_id) for t in tasks if t.task_id in self._results
-        ]
+        return [self._results.get(t.task_id) for t in tasks if t.task_id in self._results]
 
     def request_stop(self) -> None:
         """外部请求停止所有 Worker。"""
@@ -148,9 +144,7 @@ class ParallelExecutor:
         if self._stop_event.is_set():
             return
         self._stop_event.set()
-        (self.shared_dir / "_STOP").write_text(
-            f"stopped at {time.time()}", encoding="utf-8"
-        )
+        (self.shared_dir / "_STOP").write_text(f"stopped at {time.time()}", encoding="utf-8")
 
     def _run_worker(self, task: WorkerTask) -> WorkerResult:
         t0 = time.time()
@@ -216,9 +210,7 @@ class ParallelExecutor:
                         f"[parallel] Worker {task.task_id} 检测到 _STOP 文件，退出",
                         flush=True,
                     )
-                    self._append_progress(
-                        progress_file, "检测到其他 Worker 已成功"
-                    )
+                    self._append_progress(progress_file, "检测到其他 Worker 已成功")
                     break
 
                 # ★ 传入 thread_id，让 checkpointer 状态隔离
@@ -233,15 +225,11 @@ class ParallelExecutor:
 
                 last = new_messages[-1] if new_messages else None
                 if last is not None and not getattr(last, "tool_calls", None):
-                    tool_calls += sum(
-                        1 for m in new_messages if getattr(m, "tool_calls", None)
-                    )
+                    tool_calls += sum(1 for m in new_messages if getattr(m, "tool_calls", None))
                     break
 
                 invoke_messages = new_messages
-                tool_calls += sum(
-                    1 for m in new_messages if getattr(m, "tool_calls", None)
-                )
+                tool_calls += sum(1 for m in new_messages if getattr(m, "tool_calls", None))
 
             # 读取 Worker 写的结果文件
             if result_file.exists():
@@ -269,9 +257,7 @@ class ParallelExecutor:
             )
 
         except Exception as e:
-            self._append_progress(
-                progress_file, f"异常: {type(e).__name__}: {e}"
-            )
+            self._append_progress(progress_file, f"异常: {type(e).__name__}: {e}")
             return WorkerResult(
                 task_id=task.task_id,
                 success=False,

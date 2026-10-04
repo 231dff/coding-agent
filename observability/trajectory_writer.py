@@ -28,9 +28,7 @@ class TrajectoryWriter:
         self.path = self.base_dir / f"{session_id}.jsonl"
 
         self._q: queue.Queue = queue.Queue(maxsize=20000)
-        self._thread = threading.Thread(
-            target=self._run, name="traj-writer", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="traj-writer", daemon=True)
         self._thread.start()
 
     # ---------- 公开 API ----------

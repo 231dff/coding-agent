@@ -4,6 +4,7 @@
   1. 独立 tool_result: {name: "run_tests", output: "..."}
   2. 附加在写操作返回里: {name: "write_file", output: "...=== AutoTest Results ===..."}
 """
+
 from __future__ import annotations
 
 import re
@@ -23,7 +24,8 @@ class ResultVerifier:
     def verify(self, events: list[TrajEvent]) -> DimensionResult:
         # ---------- 1. 拦截"带错误的执行" ----------
         broken = [
-            e for e in events
+            e
+            for e in events
             if e.type == "tool_result"
             and e.name in self.EXIT_CHECKED_TOOLS
             and (e.has_oci_error or (e.exit_code is not None and e.exit_code != 0))
@@ -31,7 +33,9 @@ class ResultVerifier:
         if broken:
             evidence = [
                 Evidence(
-                    line_no=e.line_no, ts=e.ts, tool_name=e.name,
+                    line_no=e.line_no,
+                    ts=e.ts,
+                    tool_name=e.name,
                     tool_call_id=e.tool_call_id,
                     quote=(e.output_raw or "")[:200],
                     source="environment",
@@ -54,9 +58,7 @@ class ResultVerifier:
 
         # ---------- 2. 识别任务类型 ----------
         wrote_files = any(
-            e.type == "tool_result"
-            and e.name in self.WRITE_TOOLS
-            and e.success is True
+            e.type == "tool_result" and e.name in self.WRITE_TOOLS and e.success is True
             for e in events
         )
 
@@ -71,10 +73,12 @@ class ResultVerifier:
                     severity=Severity.HIGH,
                     confidence=0.5,
                     reason="修改了文件但未跑测试（无 run_tests 也无 AutoTest 标记）",
-                    evidence=[Evidence(
-                        source="trajectory",
-                        quote="wrote_files=True, test_evidence=0",
-                    )],
+                    evidence=[
+                        Evidence(
+                            source="trajectory",
+                            quote="wrote_files=True, test_evidence=0",
+                        )
+                    ],
                 )
 
             if failures:
@@ -96,10 +100,7 @@ class ResultVerifier:
             )
 
         # ---------- 4. 查询类任务 ----------
-        successful = [
-            e for e in events
-            if e.type == "tool_result" and e.success is True
-        ]
+        successful = [e for e in events if e.type == "tool_result" and e.success is True]
         if not successful:
             return DimensionResult(
                 name="task_result",
@@ -111,7 +112,9 @@ class ResultVerifier:
 
         evidence = [
             Evidence(
-                line_no=e.line_no, ts=e.ts, tool_name=e.name,
+                line_no=e.line_no,
+                ts=e.ts,
+                tool_name=e.name,
                 tool_call_id=e.tool_call_id,
                 quote=(e.content or "")[:120],
                 source="tool",
@@ -142,11 +145,16 @@ class ResultVerifier:
             # 来源 1: 独立 run_tests
             if e.name == "run_tests":
                 ok = bool(_AUTO_TEST_OK_RE.search(text))
-                evidence.append(Evidence(
-                    line_no=e.line_no, ts=e.ts, tool_name="run_tests",
-                    tool_call_id=e.tool_call_id,
-                    quote=text[:200], source="tool",
-                ))
+                evidence.append(
+                    Evidence(
+                        line_no=e.line_no,
+                        ts=e.ts,
+                        tool_name="run_tests",
+                        tool_call_id=e.tool_call_id,
+                        quote=text[:200],
+                        source="tool",
+                    )
+                )
                 if not ok:
                     failures.append(f"L{e.line_no} run_tests 未通过")
 
@@ -154,15 +162,19 @@ class ResultVerifier:
             elif e.name in self.WRITE_TOOLS and AUTO_TEST_MARKER in text:
                 # 提取 AutoTest 段
                 idx = text.find(AUTO_TEST_MARKER)
-                tail = text[idx:idx + 500]
+                tail = text[idx : idx + 500]
                 ok = bool(_AUTO_TEST_OK_RE.search(tail))
                 failed = bool(_AUTO_TEST_FAIL_RE.search(tail))
-                evidence.append(Evidence(
-                    line_no=e.line_no, ts=e.ts,
-                    tool_name=f"{e.name}+AutoTest",
-                    tool_call_id=e.tool_call_id,
-                    quote=tail[:200], source="tool",
-                ))
+                evidence.append(
+                    Evidence(
+                        line_no=e.line_no,
+                        ts=e.ts,
+                        tool_name=f"{e.name}+AutoTest",
+                        tool_call_id=e.tool_call_id,
+                        quote=tail[:200],
+                        source="tool",
+                    )
+                )
                 if failed or not ok:
                     failures.append(f"L{e.line_no} AutoTest 未通过")
 

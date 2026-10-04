@@ -109,21 +109,25 @@ def mine_cases(
     cases = []
     for i, e in enumerate(picked):
         category = (
-            "veto" if e.get("veto_triggered")
-            else "failure" if e.get("verdict") == "fail"
+            "veto"
+            if e.get("veto_triggered")
+            else "failure"
+            if e.get("verdict") == "fail"
             else "general"
         )
         case_id = f"case-{int(time.time())}-{i:03d}"
-        cases.append(EvalCase(
-            case_id=case_id,
-            task=e.get("task", "")[:500],
-            category=category,
-            expected_verdict=e.get("verdict", "uncertain"),
-            expected_veto=bool(e.get("veto_triggered")),
-            baseline_verdict=e.get("verdict", ""),
-            baseline_session=e.get("session_id", ""),
-            notes=f"来自会话 {e.get('session_id', '?')}",
-        ))
+        cases.append(
+            EvalCase(
+                case_id=case_id,
+                task=e.get("task", "")[:500],
+                category=category,
+                expected_verdict=e.get("verdict", "uncertain"),
+                expected_veto=bool(e.get("veto_triggered")),
+                baseline_verdict=e.get("verdict", ""),
+                baseline_session=e.get("session_id", ""),
+                notes=f"来自会话 {e.get('session_id', '?')}",
+            )
+        )
 
     dataset.save(cases)
     return cases

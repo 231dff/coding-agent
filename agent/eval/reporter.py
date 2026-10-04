@@ -95,6 +95,7 @@ def save_report(report: EvalReport, path: Path | str) -> None:
 
 # ---------- 内部 ----------
 
+
 def _overview_panel(report: EvalReport) -> Panel:
     elapsed = report.finished_at - report.started_at
     parts = [
@@ -167,8 +168,10 @@ def _details_panel(
     table.add_column("耗时", justify="right", width=8)
 
     for r in results:
-        status = "[green]✓[/green]" if r.success else (
-            "[yellow]![/yellow]" if r.error else "[red]✗[/red]"
+        status = (
+            "[green]✓[/green]"
+            if r.success
+            else ("[yellow]![/yellow]" if r.error else "[red]✗[/red]")
         )
         table.add_row(
             r.case_id,

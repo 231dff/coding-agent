@@ -28,6 +28,7 @@ def run_evolve(rt, n: int = 20, apply: bool = False) -> None:
     console.print(_format_stats_panel(stats))
 
     from agent.core import _build_compaction_llm
+
     aggregator_llm = _build_compaction_llm(rt.config)
 
     aggregator = ExperienceAggregator(aggregator_llm)
@@ -50,14 +51,14 @@ def run_evolve(rt, n: int = 20, apply: bool = False) -> None:
         _apply_proposal(rt, result, path)
     else:
         console.print(
-            "\n[dim]提示：候选规则保存在提案文件里，"
-            "人工审核后再决定是否加入系统提示。[/dim]"
+            "\n[dim]提示：候选规则保存在提案文件里，人工审核后再决定是否加入系统提示。[/dim]"
         )
 
 
 def _load_current_prompt(rt) -> str:
     try:
         from agent.core import load_system_prompt
+
         return load_system_prompt(rt.config.agent_home)
     except Exception:
         return ""
@@ -90,7 +91,9 @@ def _format_summary_panel(result: dict) -> Panel:
     if candidate:
         lines.append(f"### 候选规则 ({len(candidate)})")
         for r in candidate[:5]:
-            lines.append(f"- `[{r.get('priority', '?')}/{r.get('scope', '?')}]` {r.get('rule', '?')}")
+            lines.append(
+                f"- `[{r.get('priority', '?')}/{r.get('scope', '?')}]` {r.get('rule', '?')}"
+            )
     if not lines:
         lines.append("[dim]没有发现显著模式[/dim]")
     return Panel("\n".join(lines), title="分析摘要", border_style="green")
@@ -136,28 +139,31 @@ def _render_proposal(
         lines.append(f"证据: {', '.join(r.get('evidence', []))}")
         lines.append("")
 
-    lines.extend([
-        "## 人工审核清单",
-        "",
-        "- [ ] 支持证据是否足够（≥2 条 session）",
-        "- [ ] 与现有规则是否冲突",
-        "- [ ] 是否引入过度约束",
-        "- [ ] 应用后是否需要在保留集上回归测试",
-        "",
-        "## 应用方式",
-        "",
-        "1. 把 high 优先级、global 作用域的规则加入 `prompts/system_v1.md`",
-        "2. 把 scope=coding 的规则加入项目级 `AGENTS.md`",
-        "3. 把需要工具支持的规则做成 Skill",
-        "4. 应用后跑一遍回归测试",
-        "",
-    ])
+    lines.extend(
+        [
+            "## 人工审核清单",
+            "",
+            "- [ ] 支持证据是否足够（≥2 条 session）",
+            "- [ ] 与现有规则是否冲突",
+            "- [ ] 是否引入过度约束",
+            "- [ ] 应用后是否需要在保留集上回归测试",
+            "",
+            "## 应用方式",
+            "",
+            "1. 把 high 优先级、global 作用域的规则加入 `prompts/system_v1.md`",
+            "2. 把 scope=coding 的规则加入项目级 `AGENTS.md`",
+            "3. 把需要工具支持的规则做成 Skill",
+            "4. 应用后跑一遍回归测试",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
 def _apply_proposal(rt, result: dict, proposal_path: Path) -> None:
     high_global = [
-        r for r in result.get("candidate_rules", [])
+        r
+        for r in result.get("candidate_rules", [])
         if r.get("priority") == "high" and r.get("scope") == "global"
     ]
     if not high_global:

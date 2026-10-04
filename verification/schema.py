@@ -58,9 +58,7 @@ class TrajectoryDiagnosis(BaseModel):
 
         # ★ 只有 MEDIUM+ 且低置信度才触发人工复核
         #   LOW 的 UNCERTAIN（如未配置 judge）不触发
-        if dim.confidence < 0.6 and dim.severity in (
-            Severity.MEDIUM, Severity.HIGH, Severity.VETO
-        ):
+        if dim.confidence < 0.6 and dim.severity in (Severity.MEDIUM, Severity.HIGH, Severity.VETO):
             self.requires_human_review = True
 
     def get(self, name: str) -> Optional[DimensionResult]:

@@ -828,9 +828,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     if not eval_mode:
         from datetime import datetime
 
-        session_id = (
-            f"session-{datetime.now():%Y%m%d-%H%M%S}-{os.getpid() & 0xFFFF:04x}"
-        )
+        session_id = f"session-{datetime.now():%Y%m%d-%H%M%S}-{os.getpid() & 0xFFFF:04x}"
         trajectory_writer = TrajectoryWriter(
             session_id=session_id,
             base_dir=str(cfg.trajectory_dir),
@@ -879,9 +877,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     # P1-1: 自动测试
     auto_test_mw = AutoTestMiddleware(
-        test_command=os.getenv(
-            "AGENT_AUTO_TEST_COMMAND", "pytest tests/ -v --tb=short"
-        ),
+        test_command=os.getenv("AGENT_AUTO_TEST_COMMAND", "pytest tests/ -v --tb=short"),
         enabled=_env_bool("AGENT_AUTO_TEST", "true"),
         cooldown_s=_env_float("AGENT_AUTO_TEST_COOLDOWN", 3.0),
     )
@@ -940,9 +936,7 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     # ---------- 13.1 P1-1: 注入 run_tests 到 auto_test_mw ----------
     try:
-        run_tests_tool = next(
-            (t for t in all_tools_pool if t.name == "run_tests"), None
-        )
+        run_tests_tool = next((t for t in all_tools_pool if t.name == "run_tests"), None)
         if run_tests_tool is not None:
             auto_test_mw.bind_run_tests_tool(run_tests_tool)
             log.info("auto_test_mw_bound", tool="run_tests")

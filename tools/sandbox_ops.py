@@ -67,7 +67,7 @@ def execute(command: str, timeout: int = 60) -> str:
     """
     _, shell = _require()
     result = shell.execute(command, timeout=timeout)
-    _raise_if_failed("execute", result)   # ★ 失败时抛异常
+    _raise_if_failed("execute", result)  # ★ 失败时抛异常
     return result.to_text()
 
 

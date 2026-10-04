@@ -15,8 +15,8 @@ class EvalCase:
 
     case_id: str
     task: str
-    category: str = "general"          # general / failure / veto / complex
-    expected_verdict: str = "pass"     # pass / fail / uncertain
+    category: str = "general"  # general / failure / veto / complex
+    expected_verdict: str = "pass"  # pass / fail / uncertain
     expected_veto: bool = False
     # 用于对比的基线（历史 runs）
     baseline_verdict: str = ""
@@ -31,7 +31,7 @@ class EvalResult:
     case_id: str
     actual_verdict: str
     actual_veto: bool
-    success: bool                        # actual_verdict == expected_verdict
+    success: bool  # actual_verdict == expected_verdict
     diff_reason: str = ""
     failed_dimensions: list[str] = field(default_factory=list)
     tool_calls: int = 0
@@ -51,7 +51,7 @@ class EvalReport:
     results: list[EvalResult] = field(default_factory=list)
 
     # 与 baseline 对比
-    regressions: list[str] = field(default_factory=list)    # case_id 列表
+    regressions: list[str] = field(default_factory=list)  # case_id 列表
     improvements: list[str] = field(default_factory=list)
     unchanged: int = 0
 

@@ -1,5 +1,6 @@
 # scripts/fix_pyproject.py
 """一次性地把 verification* 加进 pyproject.toml 的 include 数组。"""
+
 import sys
 import tomllib
 from pathlib import Path
@@ -21,7 +22,7 @@ else:
 
     if old in text:
         text = text.replace(old, new, 1)
-        p.write_bytes(text.encode("utf-8"))   # ★ 无 BOM 写入
+        p.write_bytes(text.encode("utf-8"))  # ★ 无 BOM 写入
         print("[OK] 已添加 verification*")
     else:
         print("[失败] 未找到 '    \"api*\",' 这一行，请手动编辑")

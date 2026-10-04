@@ -20,7 +20,7 @@ class ProcessVerifier:
     def verify(self, events: list[TrajEvent]) -> list[DimensionResult]:
         return [
             self._check_rules(events),
-            self._check_tool_health(events),          # ★ 新增
+            self._check_tool_health(events),  # ★ 新增
             self._check_promise_action(events),
         ]
 
@@ -33,19 +33,28 @@ class ProcessVerifier:
             for pat, reason in self.forbidden_patterns:
                 if re.search(pat, blob):
                     violations.append(f"L{e.line_no} {reason}: {e.name}")
-                    evidence.append(Evidence(
-                        line_no=e.line_no, ts=e.ts,
-                        tool_name=e.name, quote=blob[:200],
-                    ))
+                    evidence.append(
+                        Evidence(
+                            line_no=e.line_no,
+                            ts=e.ts,
+                            tool_name=e.name,
+                            quote=blob[:200],
+                        )
+                    )
         if violations:
             return DimensionResult(
-                name="rule_compliance", verdict=Verdict.FAIL,
-                severity=Severity.HIGH, confidence=1.0,
-                reason="；".join(violations), evidence=evidence,
+                name="rule_compliance",
+                verdict=Verdict.FAIL,
+                severity=Severity.HIGH,
+                confidence=1.0,
+                reason="；".join(violations),
+                evidence=evidence,
             )
         return DimensionResult(
-            name="rule_compliance", verdict=Verdict.PASS,
-            severity=Severity.HIGH, confidence=1.0,
+            name="rule_compliance",
+            verdict=Verdict.PASS,
+            severity=Severity.HIGH,
+            confidence=1.0,
             reason="未发现规则违规",
         )
 
@@ -58,8 +67,10 @@ class ProcessVerifier:
         for e in events:
             if e.type != "tool_result":
                 continue
-            failed = (e.success is False) or e.has_oci_error or (
-                e.exit_code is not None and e.exit_code != 0
+            failed = (
+                (e.success is False)
+                or e.has_oci_error
+                or (e.exit_code is not None and e.exit_code != 0)
             )
             if not failed:
                 continue
@@ -68,21 +79,28 @@ class ProcessVerifier:
         offenders = {k: v for k, v in by_tool.items() if len(v) >= 3}
         if not offenders:
             return DimensionResult(
-                name="tool_health", verdict=Verdict.PASS,
-                severity=Severity.MEDIUM, confidence=0.9,
+                name="tool_health",
+                verdict=Verdict.PASS,
+                severity=Severity.MEDIUM,
+                confidence=0.9,
                 reason="无工具连续失败",
             )
 
         evidence = []
         for tool, evs in offenders.items():
-            evidence.append(Evidence(
-                line_no=evs[0].line_no, tool_name=tool,
-                quote=f"{tool} 连续失败 {len(evs)} 次",
-                source="environment",
-            ))
+            evidence.append(
+                Evidence(
+                    line_no=evs[0].line_no,
+                    tool_name=tool,
+                    quote=f"{tool} 连续失败 {len(evs)} 次",
+                    source="environment",
+                )
+            )
         return DimensionResult(
-            name="tool_health", verdict=Verdict.FAIL,
-            severity=Severity.HIGH, confidence=1.0,
+            name="tool_health",
+            verdict=Verdict.FAIL,
+            severity=Severity.HIGH,
+            confidence=1.0,
             reason="；".join(f"{t} 连续失败 {len(v)} 次" for t, v in offenders.items()),
             evidence=evidence,
         )
@@ -93,8 +111,7 @@ class ProcessVerifier:
         覆盖你这条轨迹的情况：write_file 成功，execute 全失败。
         """
         wrote_files = any(
-            e.type == "tool_result" and e.name in ("write_file", "edit_file")
-            and e.success is True
+            e.type == "tool_result" and e.name in ("write_file", "edit_file") and e.success is True
             for e in events
         )
         has_successful_run = any(
@@ -109,17 +126,21 @@ class ProcessVerifier:
         if wrote_files and not has_successful_run:
             return DimensionResult(
                 name="promise_action_consistency",
-                verdict=Verdict.FAIL, severity=Severity.VETO,
+                verdict=Verdict.FAIL,
+                severity=Severity.VETO,
                 confidence=0.9,
                 reason="写入了文件，但从未成功执行过任何验证",
-                evidence=[Evidence(
-                    source="trajectory",
-                    quote="wrote_files=True, has_successful_run=False",
-                )],
+                evidence=[
+                    Evidence(
+                        source="trajectory",
+                        quote="wrote_files=True, has_successful_run=False",
+                    )
+                ],
             )
         return DimensionResult(
             name="promise_action_consistency",
-            verdict=Verdict.PASS, severity=Severity.VETO,
+            verdict=Verdict.PASS,
+            severity=Severity.VETO,
             confidence=0.85,
             reason="写操作与验证配对正常",
         )

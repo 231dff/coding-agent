@@ -8,11 +8,16 @@ from .schema import DimensionResult, Severity, Verdict
 
 DEFAULT_CODING_RUBRIC = {
     "dimensions": [
-        {"name": "change_scope", "severity": "medium",
-         "levels": {"4": "改动最小、仅触及必要文件",
-                    "3": "有少量冗余改动",
-                    "2": "涉及不相关文件",
-                    "1": "大面积重写"}},
+        {
+            "name": "change_scope",
+            "severity": "medium",
+            "levels": {
+                "4": "改动最小、仅触及必要文件",
+                "3": "有少量冗余改动",
+                "2": "涉及不相关文件",
+                "1": "大面积重写",
+            },
+        },
     ]
 }
 
@@ -28,37 +33,43 @@ class QualityVerifier:
 
     def verify(self, task_id: str, events: list[TrajEvent]) -> list[DimensionResult]:
         if self.judge is None:
-            return [DimensionResult(
-                name="quality_judge",
-                verdict=Verdict.UNCERTAIN,
-                severity=Severity.LOW,
-                confidence=0.0,
-                reason="未配置 LLM Judge，质量层跳过",
-            )]
+            return [
+                DimensionResult(
+                    name="quality_judge",
+                    verdict=Verdict.UNCERTAIN,
+                    severity=Severity.LOW,
+                    confidence=0.0,
+                    reason="未配置 LLM Judge，质量层跳过",
+                )
+            ]
 
         prompt = self._build_prompt(task_id, events)
         try:
             raw = self.judge(prompt)
             parsed = json.loads(raw)
         except Exception as e:
-            return [DimensionResult(
-                name="quality_judge",
-                verdict=Verdict.UNCERTAIN,
-                severity=Severity.LOW,
-                confidence=0.0,
-                reason=f"Judge 调用失败: {e}",
-            )]
+            return [
+                DimensionResult(
+                    name="quality_judge",
+                    verdict=Verdict.UNCERTAIN,
+                    severity=Severity.LOW,
+                    confidence=0.0,
+                    reason=f"Judge 调用失败: {e}",
+                )
+            ]
 
         results = []
         for dim in DEFAULT_CODING_RUBRIC["dimensions"]:
             item = parsed.get(dim["name"], {})
-            results.append(DimensionResult(
-                name=dim["name"],
-                verdict=Verdict(item.get("verdict", "uncertain")),
-                severity=Severity(dim["severity"]),
-                confidence=float(item.get("confidence", 0.5)),
-                reason=item.get("reason", ""),
-            ))
+            results.append(
+                DimensionResult(
+                    name=dim["name"],
+                    verdict=Verdict(item.get("verdict", "uncertain")),
+                    severity=Severity(dim["severity"]),
+                    confidence=float(item.get("confidence", 0.5)),
+                    reason=item.get("reason", ""),
+                )
+            )
         return results
 
     @staticmethod
@@ -69,8 +80,7 @@ class QualityVerifier:
                 lines.append(f"[{e.line_no}] CALL {e.name} {e.args}")
             elif e.type == "tool_result":
                 lines.append(
-                    f"[{e.line_no}] RESULT {e.name} success={e.success} "
-                    f"{(e.content or '')[:120]}"
+                    f"[{e.line_no}] RESULT {e.name} success={e.success} {(e.content or '')[:120]}"
                 )
         return (
             f"Task {task_id}. 请按 Rubric 打分（严格 JSON）。\n"

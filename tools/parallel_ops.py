@@ -55,11 +55,13 @@ def spawn_workers(tasks_json: str) -> str:
         desc = item.get("description", "")
         if not desc:
             continue
-        tasks.append(WorkerTask(
-            task_id=task_id,
-            description=desc,
-            agent_type=item.get("agent_type", "general"),
-        ))
+        tasks.append(
+            WorkerTask(
+                task_id=task_id,
+                description=desc,
+                agent_type=item.get("agent_type", "general"),
+            )
+        )
 
     if not tasks:
         return json.dumps({"error": "没有有效的任务"}, ensure_ascii=False)

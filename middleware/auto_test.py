@@ -146,17 +146,13 @@ class AutoTestMiddleware(AgentMiddleware):
 
     def _run_tests(self) -> str:
         try:
-            return str(self._run_tests_tool.invoke(
-                {"command": self.test_command}
-            ))
+            return str(self._run_tests_tool.invoke({"command": self.test_command}))
         except Exception as e:
             return f"[AutoTest] 调用失败: {e}"
 
     async def _run_tests_async(self) -> str:
         try:
-            return str(await self._run_tests_tool.ainvoke(
-                {"command": self.test_command}
-            ))
+            return str(await self._run_tests_tool.ainvoke({"command": self.test_command}))
         except Exception as e:
             return f"[AutoTest] 调用失败: {e}"
 
@@ -167,12 +163,7 @@ class AutoTestMiddleware(AgentMiddleware):
             c = result.content
             original = c if isinstance(c, str) else str(c)
 
-        combined = (
-            f"{original}\n\n"
-            f"{AUTO_TEST_MARKER}\n"
-            f"[工具] {tool_name}\n"
-            f"{test_output}"
-        )
+        combined = f"{original}\n\n{AUTO_TEST_MARKER}\n[工具] {tool_name}\n{test_output}"
 
         if hasattr(result, "content"):
             result.content = combined

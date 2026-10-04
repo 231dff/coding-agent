@@ -42,6 +42,7 @@ def render_stats(snap: StatsSnapshot, console: Console | None = None) -> None:
 
 # ---------- 内部 ----------
 
+
 def _overview_panel(snap: StatsSnapshot) -> Panel:
     total = snap.total_tasks
     success_rate = snap.success_count / total * 100 if total else 0.0
@@ -92,9 +93,7 @@ def _failed_dims_panel(snap: StatsSnapshot) -> Panel:
     table.add_column("维度", style="bold")
     table.add_column("失败次数", justify="right", style="red")
 
-    sorted_dims = sorted(
-        snap.failed_dimensions.items(), key=lambda kv: kv[1], reverse=True
-    )
+    sorted_dims = sorted(snap.failed_dimensions.items(), key=lambda kv: kv[1], reverse=True)
     for name, count in sorted_dims[:8]:
         table.add_row(name, str(count))
 
@@ -134,8 +133,8 @@ def _cost_panel(snap: StatsSnapshot) -> Panel:
     lines = [f"[bold]总成本[/bold]  [yellow]${snap.total_cost_usd:.4f}[/yellow]", ""]
     if snap.cost_by_model:
         lines.append("[dim]按模型[/dim]")
-        for model, cost in sorted(
-            snap.cost_by_model.items(), key=lambda kv: kv[1], reverse=True
-        )[:5]:
+        for model, cost in sorted(snap.cost_by_model.items(), key=lambda kv: kv[1], reverse=True)[
+            :5
+        ]:
             lines.append(f"  {model}  ${cost:.4f}")
     return Panel("\n".join(lines), title="成本", border_style="yellow")

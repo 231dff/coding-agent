@@ -93,8 +93,15 @@ def _silence_noisy_loggers() -> None:
         return
 
     noisy_prefixes = (
-        "httpx", "httpcore", "mcp", "langchain_openai", "openai",
-        "urllib3", "filelock", "asyncio", "matplotlib",
+        "httpx",
+        "httpcore",
+        "mcp",
+        "langchain_openai",
+        "openai",
+        "urllib3",
+        "filelock",
+        "asyncio",
+        "matplotlib",
     )
     for name in list(logging.root.manager.loggerDict.keys()):
         if any(name.startswith(p) for p in noisy_prefixes):
@@ -149,6 +156,7 @@ def _rotate_trajectory(rt, thread_id: str) -> None:
     if tw is None:
         return
     from datetime import datetime as _dt
+
     new_sid = f"session-{thread_id}-{_dt.now():%Y%m%d-%H%M%S}"
     try:
         tw.rotate(new_sid)
@@ -187,8 +195,11 @@ def _build_welcome_info(project_path, rt, thread_id: str | None = None):
     cfg = rt.config
 
     info = Table(
-        show_header=False, show_edge=False, box=None,
-        padding=(0, 2), expand=False,
+        show_header=False,
+        show_edge=False,
+        box=None,
+        padding=(0, 2),
+        expand=False,
     )
     info.add_column("icon", style="bright_cyan", width=3, justify="center")
     info.add_column("key", style="dim", width=6, justify="right")
@@ -196,7 +207,8 @@ def _build_welcome_info(project_path, rt, thread_id: str | None = None):
 
     info.add_row("📁", "项目", f"[white]{project_path}[/white]")
     info.add_row(
-        "🧠", "模型",
+        "🧠",
+        "模型",
         f"[white]{cfg.provider_id}[/white][dim] / [/dim][bright_white]{cfg.model}[/bright_white]",
     )
 
@@ -204,14 +216,16 @@ def _build_welcome_info(project_path, rt, thread_id: str | None = None):
         stats = rt.skill_registry.stats()
         total = stats["model_invoked"] + stats["user_invoked"]
         info.add_row(
-            "🔧", "技能",
+            "🔧",
+            "技能",
             f"[white]{total}[/white] 个 "
             f"[dim]({stats['model_invoked']} 自动 · {stats['user_invoked']} 手动)[/dim]",
         )
 
     mem = store_backend_info()
     info.add_row(
-        "💾", "记忆",
+        "💾",
+        "记忆",
         f"[white]{mem.get('backend', '?')}[/white] [dim]({mem.get('type', '?')})[/dim]",
     )
 
@@ -448,7 +462,8 @@ def show_recall(query: str) -> None:
         from memory.retriever import get_retriever
 
         items = get_retriever(user_id=current_user_id()).search(
-            query=query, top_k=5,
+            query=query,
+            top_k=5,
         )
     except Exception as e:
         console.print(f"[red]检索失败: {e}[/red]")
@@ -588,7 +603,8 @@ def _do_extraction(rt, thread_id: str) -> None:
         if os.getenv("AGENT_RETRIEVAL", "true").lower() == "true":
             try:
                 summary = summarize_session(
-                    llm, messages,
+                    llm,
+                    messages,
                     session_id=thread_id,
                     user_id=user_id,
                     project_path=project_path,
@@ -597,6 +613,7 @@ def _do_extraction(rt, thread_id: str) -> None:
                     session_summary_repo(user_id=user_id).add(summary)
                     try:
                         from memory.retriever import get_retriever
+
                         get_retriever(user_id=user_id).index(summary)
                     except Exception as idx_err:
                         log.warning("retriever_index_failed", error=str(idx_err))
@@ -654,7 +671,8 @@ def process_pending_on_startup(rt, current_thread_id: str) -> None:
                 except Exception as e:
                     log.warning(
                         "pending_extraction_failed",
-                        thread_id=task.thread_id, error=str(e),
+                        thread_id=task.thread_id,
+                        error=str(e),
                     )
 
         t = threading.Thread(target=_run, daemon=True, name="pending-extract")
@@ -734,12 +752,8 @@ def _archive_experience(rt, thread_id: str, task: str) -> None:
         verifier = TrajectoryVerifier()
         diag = verifier.verify(task_id=traj_path.stem, events=events)
 
-        failed_dims = [
-            d.name for d in diag.dimensions if d.verdict == Verdict.FAIL
-        ]
-        uncertain_dims = [
-            d.name for d in diag.dimensions if d.verdict == Verdict.UNCERTAIN
-        ]
+        failed_dims = [d.name for d in diag.dimensions if d.verdict == Verdict.FAIL]
+        uncertain_dims = [d.name for d in diag.dimensions if d.verdict == Verdict.UNCERTAIN]
 
         reviewer_verdict = ""
         reviewer_confidence = 0.0
@@ -759,7 +773,10 @@ def _archive_experience(rt, thread_id: str, task: str) -> None:
         files_changed = []
         for e in events:
             if e.type == "tool_call" and e.name in (
-                "write_file", "edit_file", "apply_patch", "sandbox_write"
+                "write_file",
+                "edit_file",
+                "apply_patch",
+                "sandbox_write",
             ):
                 args = e.args or {}
                 p = args.get("path") or args.get("file_path") or ""
@@ -802,7 +819,8 @@ def parse_agent_args() -> argparse.Namespace:
     parser.add_argument("--project", "-p", default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument(
-        "--thread-id", default=None,
+        "--thread-id",
+        default=None,
         help="会话 ID（默认按项目路径自动生成，可跨重启恢复）",
     )
     parser.add_argument("task", nargs="?", default=None)
@@ -893,12 +911,14 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
     def seal_round() -> None:
         nonlocal cur_content, cur_reasoning, cur_tool_calls
         if cur_content or cur_reasoning or cur_tool_calls:
-            turns.append({
-                "round": len(turns) + 1,
-                "content": "".join(cur_content),
-                "reasoning": "".join(cur_reasoning),
-                "tool_calls": list(cur_tool_calls),
-            })
+            turns.append(
+                {
+                    "round": len(turns) + 1,
+                    "content": "".join(cur_content),
+                    "reasoning": "".join(cur_reasoning),
+                    "tool_calls": list(cur_tool_calls),
+                }
+            )
         cur_content = []
         cur_reasoning = []
         cur_tool_calls = []
@@ -1047,7 +1067,8 @@ def run_single_task(rt, task: str, thread_id: str, display: MetricsDisplay) -> N
     except Exception as e:
         log.error(
             "single_task_failed",
-            error_type=type(e).__name__, error=str(e),
+            error_type=type(e).__name__,
+            error=str(e),
         )
         console.print(f"\n[red]错误: {type(e).__name__}: {e}[/red]")
 
@@ -1130,7 +1151,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 
         # P2: /evolve 命令
         if lower_input.startswith("/evolve"):
-            parts = user_input[len("/evolve"):].strip().split()
+            parts = user_input[len("/evolve") :].strip().split()
             n = 20
             apply_flag = False
             i = 0
@@ -1152,6 +1173,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                 i += 1
             try:
                 from agent.evolution import run_evolve
+
                 run_evolve(rt, n=n, apply=apply_flag)
             except Exception as e:
                 console.print(f"[red]/evolve 失败: {e}[/red]")
@@ -1161,6 +1183,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         if lower_input == "/stats":
             try:
                 from agent.stats import collect, render_stats
+
                 snap = collect(rt.config.meta_dir)
                 render_stats(snap, console)
             except Exception as e:
@@ -1169,7 +1192,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 
         # P4-2: /eval 命令
         if lower_input.startswith("/eval"):
-            parts = user_input[len("/eval"):].strip().split()
+            parts = user_input[len("/eval") :].strip().split()
             subcmd = parts[0] if parts else "help"
             args = parts[1:]
 
@@ -1205,14 +1228,14 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                         console.print("[dim]案例库为空。先跑 /eval mine[/dim]")
                     else:
                         from rich.table import Table as _T
+
                         t = _T(show_header=True, box=None)
                         t.add_column("case_id", style="dim")
                         t.add_column("category")
                         t.add_column("expected")
                         t.add_column("task")
                         for c in cases[:30]:
-                            t.add_row(c.case_id, c.category,
-                                      c.expected_verdict, c.task[:40])
+                            t.add_row(c.case_id, c.category, c.expected_verdict, c.task[:40])
                         console.print(t)
 
                 elif subcmd == "run":
@@ -1252,9 +1275,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 
                         if not baseline.exists():
                             save_report(report, baseline)
-                            console.print(
-                                f"[green]已保存为 baseline: {baseline}[/green]"
-                            )
+                            console.print(f"[green]已保存为 baseline: {baseline}[/green]")
                         else:
                             save_report(
                                 report,
@@ -1331,7 +1352,8 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         except Exception as e:
             log.error(
                 "task_failed",
-                error_type=type(e).__name__, error=str(e),
+                error_type=type(e).__name__,
+                error=str(e),
             )
             console.print(f"\n[red]错误: {type(e).__name__}: {e}[/red]\n")
 
@@ -1412,7 +1434,8 @@ def main() -> int:
     except Exception as e:
         log.error(
             "agent_start_failed",
-            error_type=type(e).__name__, error=str(e),
+            error_type=type(e).__name__,
+            error=str(e),
         )
         console.print(f"[red]Agent 启动失败: {type(e).__name__}: {e}[/red]")
         console.print(f"[dim]详细日志: {log_file_path()}[/dim]")

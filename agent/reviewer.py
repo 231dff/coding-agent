@@ -77,15 +77,15 @@ class Reviewer:
             dict with keys: verdict, confidence, summary, issues, suggestions
             解析失败时返回 verdict="needs_human"
         """
-        prompt = self._build_prompt(
-            task_description, diff, status_output, test_output
-        )
+        prompt = self._build_prompt(task_description, diff, status_output, test_output)
 
         try:
-            response = self.llm.invoke([
-                SystemMessage(content=REVIEWER_SYSTEM_PROMPT),
-                HumanMessage(content=prompt),
-            ])
+            response = self.llm.invoke(
+                [
+                    SystemMessage(content=REVIEWER_SYSTEM_PROMPT),
+                    HumanMessage(content=prompt),
+                ]
+            )
             raw = self._extract_content(response)
         except Exception as e:
             return {
@@ -162,11 +162,15 @@ class Reviewer:
         MAX_DIFF = 8000
         MAX_TEST = 2000
 
-        diff_display = diff if len(diff) <= MAX_DIFF else (
-            diff[:MAX_DIFF] + f"\n... (diff 已截断，共 {len(diff)} 字符)"
+        diff_display = (
+            diff
+            if len(diff) <= MAX_DIFF
+            else (diff[:MAX_DIFF] + f"\n... (diff 已截断，共 {len(diff)} 字符)")
         )
-        test_display = test_output if len(test_output) <= MAX_TEST else (
-            test_output[:MAX_TEST] + "... (truncated)"
+        test_display = (
+            test_output
+            if len(test_output) <= MAX_TEST
+            else (test_output[:MAX_TEST] + "... (truncated)")
         )
 
         parts = [
@@ -180,11 +184,13 @@ class Reviewer:
             status_output or "(空)",
         ]
         if test_output:
-            parts.extend([
-                "",
-                "## 最近的测试结果",
-                test_display,
-            ])
+            parts.extend(
+                [
+                    "",
+                    "## 最近的测试结果",
+                    test_display,
+                ]
+            )
         parts.append("")
         parts.append("请基于以上事实输出严格 JSON。")
 

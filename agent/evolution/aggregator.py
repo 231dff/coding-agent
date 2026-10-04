@@ -81,10 +81,12 @@ class ExperienceAggregator:
         prompt = self._build_prompt(records, existing_rules)
 
         try:
-            response = self.llm.invoke([
-                SystemMessage(content=AGGREGATOR_SYSTEM_PROMPT),
-                HumanMessage(content=prompt),
-            ])
+            response = self.llm.invoke(
+                [
+                    SystemMessage(content=AGGREGATOR_SYSTEM_PROMPT),
+                    HumanMessage(content=prompt),
+                ]
+            )
             raw = self._extract_content(response)
             parsed = self._parse_json(raw)
         except Exception as e:
@@ -143,7 +145,9 @@ class ExperienceAggregator:
             if r.reviewer_verdict:
                 lines.append(f"- Reviewer: {r.reviewer_verdict} (conf={r.reviewer_confidence:.2f})")
                 for issue in r.reviewer_issues[:3]:
-                    lines.append(f"  - [{issue.get('severity', '?')}] {issue.get('description', '')}")
+                    lines.append(
+                        f"  - [{issue.get('severity', '?')}] {issue.get('description', '')}"
+                    )
             if r.files_changed:
                 lines.append(f"- 改动文件: {', '.join(r.files_changed[:5])}")
             lines.append("")

@@ -127,14 +127,9 @@ class EvalRunner:
             actual_verdict = diag.overall_verdict.value
             actual_veto = diag.veto_triggered
 
-            failed_dims = [
-                d.name for d in diag.dimensions if d.verdict == Verdict.FAIL
-            ]
+            failed_dims = [d.name for d in diag.dimensions if d.verdict == Verdict.FAIL]
 
-            success = (
-                actual_verdict == case.expected_verdict
-                and actual_veto == case.expected_veto
-            )
+            success = actual_verdict == case.expected_verdict and actual_veto == case.expected_veto
             diff_reason = ""
             if not success:
                 diff_reason = (

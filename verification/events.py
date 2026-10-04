@@ -7,6 +7,7 @@
   旧（历史文件）:
     {"ts": ..., "type": "tool_call", "data": {"name": ..., "args": {...}}}
 """
+
 from __future__ import annotations
 
 import json
@@ -92,20 +93,27 @@ def _parse(line_no: int, rec: dict) -> TrajEvent:
         if em:
             exit_code = int(em.group(1))
 
-    has_oci_error = bool(
-        isinstance(output_raw, str) and _OCI_ERR_RE.search(output_raw)
-    )
+    has_oci_error = bool(isinstance(output_raw, str) and _OCI_ERR_RE.search(output_raw))
 
     return TrajEvent(
-        line_no=line_no, ts=ts, type=etype, name=name, args=args,
-        success=success, output_raw=output_raw, content=content,
-        tool_call_id=tool_call_id, exit_code=exit_code,
-        has_oci_error=has_oci_error, raw=rec,
+        line_no=line_no,
+        ts=ts,
+        type=etype,
+        name=name,
+        args=args,
+        success=success,
+        output_raw=output_raw,
+        content=content,
+        tool_call_id=tool_call_id,
+        exit_code=exit_code,
+        has_oci_error=has_oci_error,
+        raw=rec,
     )
 
 
 def load_events(path):
     return list(iter_events(path))
+
 
 def parse_lines(lines) -> list[TrajEvent]:
     """从字符串行序列解析事件。

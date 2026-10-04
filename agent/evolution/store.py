@@ -23,12 +23,12 @@ class ExperienceRecord:
     ts: float
     session_id: str
     task: str
-    verdict: str                       # pass / fail / uncertain
+    verdict: str  # pass / fail / uncertain
     veto_triggered: bool = False
     success: bool = False
     failed_dimensions: list[str] = field(default_factory=list)
     uncertain_dimensions: list[str] = field(default_factory=list)
-    reviewer_verdict: str = ""         # approve / reject / needs_human
+    reviewer_verdict: str = ""  # approve / reject / needs_human
     reviewer_confidence: float = 0.0
     reviewer_issues: list[dict] = field(default_factory=list)
     files_changed: list[str] = field(default_factory=list)

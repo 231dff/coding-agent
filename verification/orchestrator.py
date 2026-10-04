@@ -26,15 +26,12 @@ class TrajectoryVerifier:
             diag.add(d)
 
         r = diag.get("task_result")
-        diag.success = bool(
-            r and r.verdict == Verdict.PASS and not diag.veto_triggered
-        )
+        diag.success = bool(r and r.verdict == Verdict.PASS and not diag.veto_triggered)
 
         # ★ 只有 HIGH+ 维度的 UNCERTAIN 才拖累整体
         #   quality_judge（LOW）未配置时不判 UNCERTAIN
         high_uncertain = any(
-            d.verdict == Verdict.UNCERTAIN
-            and d.severity in (Severity.HIGH, Severity.VETO)
+            d.verdict == Verdict.UNCERTAIN and d.severity in (Severity.HIGH, Severity.VETO)
             for d in diag.dimensions
         )
 
@@ -52,10 +49,7 @@ class TrajectoryVerifier:
 
     @staticmethod
     def _summarize(diag):
-        lines = [
-            f"任务 {diag.task_id}: {diag.overall_verdict.value} "
-            f"(success={diag.success})"
-        ]
+        lines = [f"任务 {diag.task_id}: {diag.overall_verdict.value} (success={diag.success})"]
         if diag.veto_triggered:
             lines.append("[VETO] 触发一票否决")
         for d in diag.dimensions:

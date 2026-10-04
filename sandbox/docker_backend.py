@@ -121,11 +121,7 @@ class DockerSandbox(Sandbox):
         stripped = command.strip()
         tokens = self._safe_split(stripped)
 
-        if (
-            len(tokens) == 2
-            and tokens[0] == "cd"
-            and not self._has_shell_meta(tokens[1])
-        ):
+        if len(tokens) == 2 and tokens[0] == "cd" and not self._has_shell_meta(tokens[1]):
             self._cwd = self._resolve_cwd(eff_cwd, tokens[1])
             return ExecResult(
                 exit_code=0,

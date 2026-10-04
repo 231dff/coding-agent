@@ -41,18 +41,20 @@ def collect(
     for e in recent:
         success = bool(e.get("success"))
         verdict = e.get("verdict", "uncertain")
-        snap.tasks.append(TaskStats(
-            session_id=e.get("session_id", "?"),
-            ts=float(e.get("ts", 0)),
-            task=e.get("task", "")[:100],
-            verdict=verdict,
-            success=success,
-            tool_calls=int(e.get("tool_calls_count", 0)),
-            files_changed=len(e.get("files_changed", [])),
-            reviewer_verdict=e.get("reviewer_verdict", ""),
-            reviewer_confidence=float(e.get("reviewer_confidence", 0.0)),
-            failed_dimensions=e.get("failed_dimensions", []),
-        ))
+        snap.tasks.append(
+            TaskStats(
+                session_id=e.get("session_id", "?"),
+                ts=float(e.get("ts", 0)),
+                task=e.get("task", "")[:100],
+                verdict=verdict,
+                success=success,
+                tool_calls=int(e.get("tool_calls_count", 0)),
+                files_changed=len(e.get("files_changed", [])),
+                reviewer_verdict=e.get("reviewer_verdict", ""),
+                reviewer_confidence=float(e.get("reviewer_confidence", 0.0)),
+                failed_dimensions=e.get("failed_dimensions", []),
+            )
+        )
 
         if verdict == "pass":
             snap.success_count += 1
@@ -80,9 +82,7 @@ def collect(
     # ---------- 3. metrics.db（成本） ----------
     if metrics_db is None:
         metrics_db = Path.home() / ".coding-agent" / "metrics.db"
-    snap.total_cost_usd, snap.cost_by_model = _collect_cost(
-        Path(metrics_db), cutoff
-    )
+    snap.total_cost_usd, snap.cost_by_model = _collect_cost(Path(metrics_db), cutoff)
 
     # ---------- 4. 时间序列 ----------
     snap.daily = _build_daily(snap.tasks, days)
@@ -95,6 +95,7 @@ def collect(
 
 
 # ---------- 内部 ----------
+
 
 def _load_experiences(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
@@ -156,9 +157,7 @@ def _collect_cost(db_path: Path, cutoff: float) -> tuple[float, dict[str, float]
     try:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' LIMIT 20"
-        )
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 20")
         tables = [r[0] for r in cur.fetchall()]
         if not tables:
             return 0.0, {}

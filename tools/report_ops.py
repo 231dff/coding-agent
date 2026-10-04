@@ -94,33 +94,39 @@ def generate_summary_report(
     else:
         lines.append("(无改动)")
 
-    lines.extend([
-        "",
-        "## 改动统计",
-        "",
-        "```",
-        diff_stat.strip() or "(无 diff)",
-        "```",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 改动统计",
+            "",
+            "```",
+            diff_stat.strip() or "(无 diff)",
+            "```",
+            "",
+        ]
+    )
 
     if test_output:
-        lines.extend([
-            "## 测试结果",
-            "",
-            "```",
-            test_output.strip()[:1500],
-            "```",
-            "",
-        ])
+        lines.extend(
+            [
+                "## 测试结果",
+                "",
+                "```",
+                test_output.strip()[:1500],
+                "```",
+                "",
+            ]
+        )
 
     if review_line:
-        lines.extend([
-            "## 审查结论",
-            "",
-            review_line,
-            "",
-        ])
+        lines.extend(
+            [
+                "## 审查结论",
+                "",
+                review_line,
+                "",
+            ]
+        )
 
     report = "\n".join(lines)
 
@@ -135,6 +141,7 @@ def generate_summary_report(
 
 
 # ---------- 内部 ----------
+
 
 def _safe_exec(cmd: str, timeout: int = 15) -> str:
     try:
