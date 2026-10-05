@@ -83,10 +83,9 @@ def validate_tools(tools: list[BaseTool], strict: bool = False) -> dict:
     # 非严格模式：一行统计
     total = len(tools)
     failed = len(report)
-    print(
-        f"[lint] {failed}/{total} 个工具描述缺规范段落"
-        f"（非 strict 模式，仅提示。设置 AGENT_STRICT_LINT=true 启用严格检查）"
-    )
+    from observability.logger import get_logger
+
+    get_logger("lint").debug("tools_missing_spec", failed=failed, total=total)
     return report
 
 
