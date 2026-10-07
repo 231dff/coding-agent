@@ -13,5 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git ripgrep curl \
     && rm -rf /var/lib/apt/lists/*
 # 安装 pytest 和相关依赖
-RUN pip install --no-cache-dir pytest pytest-asyncio pytest-cov
+RUN pip install --no-cache-dir \
+    pandas numpy requests httpx \
+    pyautogen openai anthropic \
+    pydantic fastapi flask pytest
 WORKDIR /workspace
