@@ -303,10 +303,12 @@ def _plan_and_choose(rt, task: str) -> str | None:
     ):
         try:
             llm = _build_compaction_llm(rt.config)
-            resp = llm.invoke([
-                SystemMessage(content=_PLANNER_SYSTEM),
-                HumanMessage(content=f"用户任务：{task}"),
-            ])
+            resp = llm.invoke(
+                [
+                    SystemMessage(content=_PLANNER_SYSTEM),
+                    HumanMessage(content=f"用户任务：{task}"),
+                ]
+            )
             raw = _extract_content_from_resp(resp)
         except Exception as e:
             console.print(f"[yellow]规划失败：{e}，直接执行[/yellow]")
@@ -338,12 +340,14 @@ def _plan_and_choose(rt, task: str) -> str | None:
         t.add_row(str(i), name, "\n".join(detail_lines))
 
     console.print()
-    console.print(Panel(
-        t,
-        title="[bold bright_cyan]请选择实现策略[/bold bright_cyan]",
-        border_style="bright_cyan",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            t,
+            title="[bold bright_cyan]请选择实现策略[/bold bright_cyan]",
+            border_style="bright_cyan",
+            expand=False,
+        )
+    )
     console.print(
         f"[dim]输入 [bold cyan]1[/bold cyan]-[bold cyan]{len(plans)}[/bold cyan] 选择，"
         f"[bold cyan]q[/bold cyan] 取消[/dim]"
@@ -366,9 +370,7 @@ def _plan_and_choose(rt, task: str) -> str | None:
                 picked = plans[idx - 1]
                 name = picked.get("name", "")
                 desc = picked.get("desc", "")
-                console.print(
-                    f"\n[green]✓ 已选择 [{idx}] {name}[/green]"
-                )
+                console.print(f"\n[green]✓ 已选择 [{idx}] {name}[/green]")
                 console.print()
 
                 return (
@@ -377,9 +379,7 @@ def _plan_and_choose(rt, task: str) -> str | None:
                     f"请严格按此方案执行，不要再调用 propose_plan。"
                 )
 
-        console.print(
-            f"[red]请输入 1-{len(plans)} 之间的数字，或 q 取消[/red]"
-        )
+        console.print(f"[red]请输入 1-{len(plans)} 之间的数字，或 q 取消[/red]")
 
 
 # ============================================================
@@ -549,7 +549,9 @@ def print_help(show_all: bool = False) -> None:
         t.add_row("", "", "", "")
         t.add_row(
             "[dim]输入 [/dim][bold]/help --all[/bold][dim] 查看全部命令[/dim]",
-            "", "", "",
+            "",
+            "",
+            "",
         )
 
     console.print(Panel(t, title="Help", border_style="dim", expand=False))

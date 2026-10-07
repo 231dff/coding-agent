@@ -459,7 +459,7 @@ generate_summary_report(
     task_description="<用户的原始需求>",
     summary="<1-3 句总结>",
     test_output="<测试结果摘要，没有则留空>",
-    reviewer_verdict=""
+    reviewer_verdict="",
 )
 ```
 

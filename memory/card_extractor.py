@@ -215,9 +215,7 @@ def _is_duplicate(card: Card, existing_facts: list[str]) -> bool:
         if norm_new == norm_existing:
             return True
         # ★ 相似度判断
-        ratio = difflib.SequenceMatcher(
-            None, norm_new, norm_existing
-        ).ratio()
+        ratio = difflib.SequenceMatcher(None, norm_new, norm_existing).ratio()
         if ratio >= DUPLICATE_RATIO:
             return True
     return False

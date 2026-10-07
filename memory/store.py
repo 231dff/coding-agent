@@ -142,9 +142,11 @@ class LockedStore:
         # 兜底：其他方法直接转发 + 加锁
         attr = getattr(self._inner, name)
         if callable(attr):
+
             def _wrapped(*args, **kwargs):
                 with self._lock:
                     return attr(*args, **kwargs)
+
             return _wrapped
         return attr
 

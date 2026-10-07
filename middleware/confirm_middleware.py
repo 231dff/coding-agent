@@ -145,12 +145,14 @@ class ConfirmMiddleware(AgentMiddleware):
             lines.append(f"  [dim]{k}:[/dim] [white]{v_str}[/white]")
 
         _console.print()
-        _console.print(Panel(
-            f"[bold yellow]⚠ 即将执行:[/bold yellow] [bold]{name}[/bold]\n\n"
-            + "\n".join(lines),
-            border_style="yellow",
-            expand=False,
-        ))
+        _console.print(
+            Panel(
+                f"[bold yellow]⚠ 即将执行:[/bold yellow] [bold]{name}[/bold]\n\n"
+                + "\n".join(lines),
+                border_style="yellow",
+                expand=False,
+            )
+        )
         _console.print(
             "[dim]选择: [bold green]y[/bold green]=允许  "
             "[bold cyan]a[/bold cyan]=本次会话全部允许该工具  "
@@ -158,12 +160,16 @@ class ConfirmMiddleware(AgentMiddleware):
         )
 
         try:
-            ans = Prompt.ask(
-                "[bold cyan]确认[/bold cyan]",
-                console=_console,
-                choices=["y", "a", "n"],
-                default="y",
-            ).strip().lower()
+            ans = (
+                Prompt.ask(
+                    "[bold cyan]确认[/bold cyan]",
+                    console=_console,
+                    choices=["y", "a", "n"],
+                    default="y",
+                )
+                .strip()
+                .lower()
+            )
         except (KeyboardInterrupt, EOFError):
             return False
 

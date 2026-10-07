@@ -144,10 +144,12 @@ def test_extract_content_str():
 
 
 def test_extract_content_list_of_blocks():
-    resp = SimpleNamespace(content=[
-        {"type": "text", "text": "part1"},
-        {"type": "text", "text": "part2"},
-    ])
+    resp = SimpleNamespace(
+        content=[
+            {"type": "text", "text": "part1"},
+            {"type": "text", "text": "part2"},
+        ]
+    )
     assert _extract_content(resp) == "part1part2"
 
 
@@ -167,13 +169,17 @@ def test_extract_content_none():
 
 
 def test_aggregate_one_group_success():
-    llm = FakeLLM([
-        json.dumps({
-            "summary": "合并结果",
-            "key_facts": ["通用事实"],
-            "has_pattern": True,
-        })
-    ])
+    llm = FakeLLM(
+        [
+            json.dumps(
+                {
+                    "summary": "合并结果",
+                    "key_facts": ["通用事实"],
+                    "has_pattern": True,
+                }
+            )
+        ]
+    )
     items = [_make_summary("a"), _make_summary("b")]
 
     result = _aggregate_one_group(llm, "implement", items)
@@ -236,11 +242,17 @@ def test_aggregate_single_group(repo):
     for i in range(5):
         repo.add(_make_summary(f"s{i}", task_type="implement"))
 
-    llm = FakeLLM([json.dumps({
-        "summary": "合并摘要",
-        "key_facts": ["统一事实"],
-        "has_pattern": True,
-    })])
+    llm = FakeLLM(
+        [
+            json.dumps(
+                {
+                    "summary": "合并摘要",
+                    "key_facts": ["统一事实"],
+                    "has_pattern": True,
+                }
+            )
+        ]
+    )
 
     result = aggregate_summaries(llm, repo, threshold=3, min_group_size=2)
     assert result["created"] == 1
@@ -273,10 +285,12 @@ def test_aggregate_two_groups(repo):
     for i in range(3):
         repo.add(_make_summary(f"bug{i}", task_type="debug"))
 
-    llm = FakeLLM([
-        json.dumps({"summary": "implement 汇总", "has_pattern": True}),
-        json.dumps({"summary": "debug 汇总", "has_pattern": True}),
-    ])
+    llm = FakeLLM(
+        [
+            json.dumps({"summary": "implement 汇总", "has_pattern": True}),
+            json.dumps({"summary": "debug 汇总", "has_pattern": True}),
+        ]
+    )
 
     result = aggregate_summaries(llm, repo, threshold=5, min_group_size=2)
     assert result["created"] == 2
@@ -300,14 +314,9 @@ def test_aggregate_max_groups_limit(repo):
         for i in range(2):
             repo.add(_make_summary(f"{tt}{i}", task_type=tt))
 
-    llm = FakeLLM([
-        json.dumps({"summary": f"sum-{i}", "has_pattern": True})
-        for i in range(2)
-    ])
+    llm = FakeLLM([json.dumps({"summary": f"sum-{i}", "has_pattern": True}) for i in range(2)])
 
-    result = aggregate_summaries(
-        llm, repo, threshold=5, min_group_size=2, max_groups_per_run=2
-    )
+    result = aggregate_summaries(llm, repo, threshold=5, min_group_size=2, max_groups_per_run=2)
     assert result["created"] == 2  # 只处理 2 组
 
 
@@ -318,10 +327,12 @@ def test_aggregate_skips_group_on_llm_failure(repo):
     for i in range(2):
         repo.add(_make_summary(f"b{i}", task_type="bbb"))
 
-    llm = FakeLLM([
-        RuntimeError("第一组挂了"),
-        json.dumps({"summary": "bbb 成功", "has_pattern": True}),
-    ])
+    llm = FakeLLM(
+        [
+            RuntimeError("第一组挂了"),
+            json.dumps({"summary": "bbb 成功", "has_pattern": True}),
+        ]
+    )
 
     result = aggregate_summaries(llm, repo, threshold=3, min_group_size=2)
     assert result["created"] == 1

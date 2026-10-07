@@ -169,10 +169,7 @@ def aggregate_summaries(
         by_type.setdefault(s.task_type, []).append(s)
 
     # 只处理 >= min_group_size 的组，按组大小倒序（大组优先）
-    eligible = [
-        (tt, items) for tt, items in by_type.items()
-        if len(items) >= min_group_size
-    ]
+    eligible = [(tt, items) for tt, items in by_type.items() if len(items) >= min_group_size]
     eligible.sort(key=lambda kv: len(kv[1]), reverse=True)
     eligible = eligible[:max_groups_per_run]
 

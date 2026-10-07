@@ -383,6 +383,7 @@ def test_render_prompt_grouped_by_category(repo):
     assert "## code_style" in text
     assert "## tool_choice" in text
 
+
 # ============================================================
 # 补充：覆盖率缺口
 # ============================================================
@@ -415,8 +416,8 @@ def test_repo_load_all_versions_includes_superseded(repo):
     repo.add(old)
     repo.update(old.id, new_fact="新")
 
-    assert len(repo.load_all_versions()) == 2   # 新旧都在
-    assert len(repo.load_active()) == 1          # 只有新的
+    assert len(repo.load_all_versions()) == 2  # 新旧都在
+    assert len(repo.load_active()) == 1  # 只有新的
 
 
 def test_repo_search_returns_list(repo):

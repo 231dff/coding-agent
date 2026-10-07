@@ -36,9 +36,9 @@ class SessionSummary:
     id: str = ""
 
     # ★ 聚合相关字段
-    level: str = "raw"                                    # raw / daily
-    source_ids: list[str] = field(default_factory=list)   # 被聚合的原始摘要 ID
-    aggregated_into: str = ""                             # 已被聚到哪个父摘要
+    level: str = "raw"  # raw / daily
+    source_ids: list[str] = field(default_factory=list)  # 被聚合的原始摘要 ID
+    aggregated_into: str = ""  # 已被聚到哪个父摘要
 
     def __post_init__(self):
         if not self.id:
@@ -119,18 +119,12 @@ class SessionSummaryRepository:
         已聚合的 raw 不返回——内容已在 daily 里。
         """
         all_summaries = self.load_all()
-        return [
-            s for s in all_summaries
-            if s.level == "daily" or not s.aggregated_into
-        ]
+        return [s for s in all_summaries if s.level == "daily" or not s.aggregated_into]
 
     def find_unaggregated_raw(self, limit: int = 1000) -> list[SessionSummary]:
         """找所有 level=raw 且 aggregated_into 为空的摘要。"""
         all_summaries = self.load_all()
-        result = [
-            s for s in all_summaries
-            if s.level == "raw" and not s.aggregated_into
-        ]
+        result = [s for s in all_summaries if s.level == "raw" and not s.aggregated_into]
         result.sort(key=lambda x: x.timestamp)
         return result[:limit]
 

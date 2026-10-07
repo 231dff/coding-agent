@@ -59,8 +59,8 @@ class Card:
     supersedes: str | None = None
 
     # ★ 新增字段：用于 LRU + TTL 淘汰
-    last_hit_at: float = 0.0   # 上次被注入 system prompt 的时间
-    hit_count: int = 0         # 累计被注入次数
+    last_hit_at: float = 0.0  # 上次被注入 system prompt 的时间
+    hit_count: int = 0  # 累计被注入次数
 
     def __post_init__(self):
         if not self.id:

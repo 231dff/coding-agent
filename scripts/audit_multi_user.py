@@ -82,9 +82,7 @@ def main() -> int:
     for uid in sorted(user_stats.keys()):
         s = user_stats[uid]
         marker = " ← 当前" if uid == current_user_id() else ""
-        print(
-            f"  {uid:<20}  {s['cards']:>8}  {s['summaries']:>11}  {s['other']:>8}{marker}"
-        )
+        print(f"  {uid:<20}  {s['cards']:>8}  {s['summaries']:>11}  {s['other']:>8}{marker}")
 
     print()
 

@@ -106,11 +106,13 @@ def test_trajectory_diagnosis_add():
 def test_trajectory_diagnosis_veto_triggers_fail():
     """VETO + FAIL → 一票否决。"""
     diag = TrajectoryDiagnosis(task_id="t1")
-    diag.add(DimensionResult(
-        name="hallucination",
-        verdict=Verdict.FAIL,
-        severity=Severity.VETO,
-    ))
+    diag.add(
+        DimensionResult(
+            name="hallucination",
+            verdict=Verdict.FAIL,
+            severity=Severity.VETO,
+        )
+    )
     assert diag.veto_triggered is True
     assert diag.success is False
     assert diag.overall_verdict == Verdict.FAIL
@@ -119,46 +121,54 @@ def test_trajectory_diagnosis_veto_triggers_fail():
 def test_trajectory_diagnosis_high_fail_does_not_trigger_veto():
     """HIGH 的 FAIL 不触发 veto 标志（只触发 overall fail）。"""
     diag = TrajectoryDiagnosis(task_id="t1")
-    diag.add(DimensionResult(
-        name="x",
-        verdict=Verdict.FAIL,
-        severity=Severity.HIGH,
-    ))
+    diag.add(
+        DimensionResult(
+            name="x",
+            verdict=Verdict.FAIL,
+            severity=Severity.HIGH,
+        )
+    )
     assert diag.veto_triggered is False
 
 
 def test_trajectory_diagnosis_requires_human_review_medium():
     """MEDIUM + confidence < 0.6 → 需人工复核。"""
     diag = TrajectoryDiagnosis(task_id="t1")
-    diag.add(DimensionResult(
-        name="x",
-        verdict=Verdict.UNCERTAIN,
-        severity=Severity.MEDIUM,
-        confidence=0.4,
-    ))
+    diag.add(
+        DimensionResult(
+            name="x",
+            verdict=Verdict.UNCERTAIN,
+            severity=Severity.MEDIUM,
+            confidence=0.4,
+        )
+    )
     assert diag.requires_human_review is True
 
 
 def test_trajectory_diagnosis_low_confidence_does_not_trigger():
     """LOW 的 UNCERTAIN → 不触发人工复核。"""
     diag = TrajectoryDiagnosis(task_id="t1")
-    diag.add(DimensionResult(
-        name="quality_judge",
-        verdict=Verdict.UNCERTAIN,
-        severity=Severity.LOW,
-        confidence=0.0,
-    ))
+    diag.add(
+        DimensionResult(
+            name="quality_judge",
+            verdict=Verdict.UNCERTAIN,
+            severity=Severity.LOW,
+            confidence=0.0,
+        )
+    )
     assert diag.requires_human_review is False
 
 
 def test_trajectory_diagnosis_high_confidence_no_review():
     diag = TrajectoryDiagnosis(task_id="t1")
-    diag.add(DimensionResult(
-        name="x",
-        verdict=Verdict.UNCERTAIN,
-        severity=Severity.HIGH,
-        confidence=0.9,
-    ))
+    diag.add(
+        DimensionResult(
+            name="x",
+            verdict=Verdict.UNCERTAIN,
+            severity=Severity.HIGH,
+            confidence=0.9,
+        )
+    )
     assert diag.requires_human_review is False
 
 
@@ -275,10 +285,7 @@ def test_parse_content_fallback_extraction():
 def test_iter_events_skips_blank_and_invalid(tmp_path: Path):
     f = tmp_path / "traj.jsonl"
     f.write_text(
-        '{"event": "tool_call", "name": "a"}\n'
-        "\n"
-        "不是 JSON\n"
-        '{"event": "tool_call", "name": "b"}\n',
+        '{"event": "tool_call", "name": "a"}\n\n不是 JSON\n{"event": "tool_call", "name": "b"}\n',
         encoding="utf-8",
     )
     events = load_events(f)
@@ -383,9 +390,7 @@ def test_result_autotest_marker_pass():
             name="write_file",
             success=True,
             content=(
-                "OK: 已写入 a.py\n\n"
-                f"{AUTO_TEST_MARKER}\n"
-                "[工具] write_file\n测试结果: ✓ 全部通过"
+                f"OK: 已写入 a.py\n\n{AUTO_TEST_MARKER}\n[工具] write_file\n测试结果: ✓ 全部通过"
             ),
         ),
     ]
@@ -399,9 +404,7 @@ def test_result_autotest_marker_fail():
             type_="tool_result",
             name="write_file",
             success=True,
-            content=(
-                f"{AUTO_TEST_MARKER}\n[工具] write_file\n测试结果: ✗ 存在失败"
-            ),
+            content=(f"{AUTO_TEST_MARKER}\n[工具] write_file\n测试结果: ✗ 存在失败"),
         ),
     ]
     r = ResultVerifier().verify(events)
@@ -442,11 +445,13 @@ def test_process_rules_pass():
 
 
 def test_process_rules_forbidden_command():
-    events = [make_event(
-        type_="tool_call",
-        name="execute",
-        args={"command": "rm -rf /"},
-    )]
+    events = [
+        make_event(
+            type_="tool_call",
+            name="execute",
+            args={"command": "rm -rf /"},
+        )
+    ]
     pv = ProcessVerifier()
     results = pv.verify(events)
     by_name = {r.name: r for r in results}
@@ -515,13 +520,15 @@ def test_quality_no_judge_uncertain():
 
 def test_quality_judge_returns_valid_json():
     def judge(prompt: str) -> str:
-        return json.dumps({
-            "change_scope": {
-                "verdict": "pass",
-                "confidence": 0.9,
-                "reason": "改动最小",
+        return json.dumps(
+            {
+                "change_scope": {
+                    "verdict": "pass",
+                    "confidence": 0.9,
+                    "reason": "改动最小",
+                }
             }
-        })
+        )
 
     qv = QualityVerifier(judge=judge)
     results = qv.verify("t1", [])
@@ -611,11 +618,12 @@ def test_orchestrator_summary_contains_task_id():
 
 def test_orchestrator_custom_verifiers():
     """可注入自定义 verifier。"""
-    def fake_result(events):
-        return DimensionResult(name="task_result", verdict=Verdict.PASS,
-                                severity=Severity.HIGH)
 
-    v = TrajectoryVerifier(result_verifier=type(
-        "Fake", (), {"verify": staticmethod(fake_result)})())
+    def fake_result(events):
+        return DimensionResult(name="task_result", verdict=Verdict.PASS, severity=Severity.HIGH)
+
+    v = TrajectoryVerifier(
+        result_verifier=type("Fake", (), {"verify": staticmethod(fake_result)})()
+    )
     diag = v.verify("t1", [])
     assert diag.get("task_result") is not None

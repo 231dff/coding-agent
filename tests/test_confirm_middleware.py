@@ -44,6 +44,7 @@ def handler():
             tool_call_id=request.tool_call["id"],
             status="success",
         )
+
     return _h
 
 
@@ -73,12 +74,14 @@ def test_confirm_tools_contains_core():
 
 def test_dangerous_patterns_contains_rm_rf():
     import re
+
     blob = "rm -rf /tmp/foo"
     assert any(re.search(p, blob) for p in DANGEROUS_CMD_PATTERNS)
 
 
 def test_dangerous_patterns_ignores_ls():
     import re
+
     blob = "ls -la"
     assert not any(re.search(p, blob) for p in DANGEROUS_CMD_PATTERNS)
 

@@ -80,11 +80,7 @@ class ShellManager:
         tokens = self._safe_split(stripped)
 
         # ---------- 严格拦截：纯 cd ----------
-        if (
-            len(tokens) == 2
-            and tokens[0] == "cd"
-            and not _has_shell_meta(tokens[1])
-        ):
+        if len(tokens) == 2 and tokens[0] == "cd" and not _has_shell_meta(tokens[1]):
             resolved = self._resolve_cwd(session.cwd, tokens[1])
             session.cwd = resolved
             session.history.append(command)

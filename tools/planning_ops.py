@@ -85,9 +85,7 @@ def propose_plan(plans_json: str) -> str:
     try:
         plans = json.loads(plans_json)
     except json.JSONDecodeError as e:
-        return json.dumps(
-            {"error": f"plans_json 解析失败: {e}"}, ensure_ascii=False
-        )
+        return json.dumps({"error": f"plans_json 解析失败: {e}"}, ensure_ascii=False)
 
     if not isinstance(plans, list) or not plans:
         return json.dumps({"error": "plans_json 必须是非空数组"}, ensure_ascii=False)
@@ -111,11 +109,13 @@ def propose_plan(plans_json: str) -> str:
 
     # 3. 交互模式 → 用 rich 渲染 + Prompt.ask（不会被 Live 覆盖）
     _console.print()
-    _console.print(Panel(
-        "🤔 Agent 提供了多个实现策略，请选择",
-        border_style="bright_cyan",
-        expand=False,
-    ))
+    _console.print(
+        Panel(
+            "🤔 Agent 提供了多个实现策略，请选择",
+            border_style="bright_cyan",
+            expand=False,
+        )
+    )
     _console.print(_render_plans_table(plans))
     _console.print(
         "[dim]输入 [bold cyan]1[/bold cyan]-[bold cyan]{}[/bold cyan] 选择方案，"
@@ -171,9 +171,7 @@ def propose_plan(plans_json: str) -> str:
             idx = int(raw)
             if 1 <= idx <= len(plans):
                 selected = plans[idx - 1]
-                _console.print(
-                    f"[green]✓ 已选择方案 [{idx}] {selected.get('name', '')}[/green]"
-                )
+                _console.print(f"[green]✓ 已选择方案 [{idx}] {selected.get('name', '')}[/green]")
                 return json.dumps(
                     {
                         "selected_index": idx,
@@ -183,9 +181,7 @@ def propose_plan(plans_json: str) -> str:
                     ensure_ascii=False,
                 )
             else:
-                _console.print(
-                    f"[red]⚠ 请输入 1-{len(plans)} 之间的数字[/red]"
-                )
+                _console.print(f"[red]⚠ 请输入 1-{len(plans)} 之间的数字[/red]")
                 continue
 
         # 用户输入其他内容 → 视为自定义要求
