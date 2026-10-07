@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -23,6 +24,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
+from rich.table import Table
 from rich.text import Text
 
 from agent.config import AgentConfig, resolve_project_path
@@ -71,6 +73,45 @@ log = get_logger("main")
 
 
 # ============================================================
+# 环境变量小工具
+# ============================================================
+
+
+def _env_bool(key: str, default: str = "true") -> bool:
+    return os.getenv(key, default).lower() == "true"
+
+
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+# ============================================================
+# 单字母/短别名映射
+# ============================================================
+
+_ALIASES = {
+    "exit": "/exit",
+    "quit": "/exit",
+    "q": "/exit",
+    "h": "/help",
+    "?": "/help",
+    "help": "/help",
+    "s": "/stats",
+    "t": "/thinking",
+    "c": "/config",
+    "m": "/memory",
+    "k": "/skills",
+    "cards": "/cards",
+    "r": "/recall",
+    "e": "/eval",
+    "u": "/users",
+}
+
+
+# ============================================================
 # ASCII art 启动横幅
 # ============================================================
 
@@ -102,6 +143,7 @@ def _silence_noisy_loggers() -> None:
         "filelock",
         "asyncio",
         "matplotlib",
+        "autotest",
     )
     for name in list(logging.root.manager.loggerDict.keys()):
         if any(name.startswith(p) for p in noisy_prefixes):
@@ -111,7 +153,14 @@ def _silence_noisy_loggers() -> None:
 
 
 def _default_thread_id(project_path: Path) -> str:
-    key = str(project_path.resolve())
+    """默认 thread_id —— 按天隔离，防止 checkpointer 无限累积。
+
+    同一天内共享上下文（可以"接着刚才的做"），跨天自动重置。
+    跨天不丢记忆：用户卡片 / 会话摘要存在 memory/ 里。
+    """
+    from datetime import datetime
+
+    key = str(project_path.resolve()) + datetime.now().strftime("%Y%m%d")
     return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 
@@ -130,6 +179,8 @@ def _print_ready_line(rt) -> None:
     mcp_count = sum(1 for t in rt.tools if any(t.name.startswith(p) for p in mcp_prefixes))
     skill_count = len(rt.skill_registry.all_skills()) if rt.skill_registry else 0
 
+    user = current_user_id()
+
     parts = [
         "[bold green]✓[/bold green] [white]已就绪[/white]",
         f"[dim]tools={len(rt.tools)}[/dim]",
@@ -137,21 +188,206 @@ def _print_ready_line(rt) -> None:
     if mcp_count:
         parts.append(f"[dim]mcp={mcp_count}[/dim]")
     parts.append(f"[dim]skills={skill_count}[/dim]")
+    parts.append(f"[dim]user={user}[/dim]")
 
     console.print("  " + "  ".join(parts))
 
 
 # ============================================================
-# ★ P4-3: 轨迹文件轮换工具
+# Claude 风格：先规划再执行
+# ============================================================
+
+_COMPLEX_TASK_PATTERNS = [
+    r"写.{0,8}(?:一个|个).{0,25}(?:系统|框架|平台|应用|工具|服务)",
+    r"实现.{0,12}(?:系统|框架|平台|应用|工具)",
+    r"设计.{0,12}(?:系统|框架|平台|应用)",
+    r"创建.{0,12}(?:项目|系统|框架|应用)",
+    r"搭建.{0,12}(?:系统|框架|平台)",
+    r"从零.{0,10}(?:实现|搭建|构建)",
+    r"帮我做.{0,20}",
+    r"给我写.{0,20}(?:系统|框架|平台|应用|工具)",
+]
+
+_COMPLEX_TASK_MIN_LEN = 25
+
+
+def _is_complex_task(text: str) -> bool:
+    """判断是否是复杂任务——需要先给策略。"""
+    if os.getenv("AGENT_PLAN_FIRST", "on").lower() == "off":
+        return False
+
+    for pattern in _COMPLEX_TASK_PATTERNS:
+        if re.search(pattern, text):
+            return True
+
+    if len(text.strip()) >= _COMPLEX_TASK_MIN_LEN:
+        return True
+
+    return False
+
+
+_PLANNER_SYSTEM = """你是一个实现规划师。用户提出了一个任务，你需要给出 2-4 个**明显不同**的实现策略，让用户选择。
+
+每个策略必须包含：
+- name: 简短的名字（4-8 个字）
+- desc: 一句话说明怎么做（20-40 字）
+- pros: 这个方案最大的优点（10-20 字）
+- cons: 这个方案最大的缺点（10-20 字）
+
+策略之间必须**真的不同**——不能只是命名不同、内容雷同。
+
+只输出 JSON，不要任何其他内容（不要 markdown 代码块）：
+
+{
+  "plans": [
+    {"name": "方案名1", "desc": "说明", "pros": "优点", "cons": "缺点"},
+    {"name": "方案名2", "desc": "说明", "pros": "优点", "cons": "缺点"}
+  ]
+}
+"""
+
+
+def _extract_content_from_resp(resp) -> str:
+    c = getattr(resp, "content", "")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        parts = []
+        for block in c:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return str(c)
+
+
+def _parse_plans(raw: str) -> list[dict]:
+    text = raw.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data.get("plans", [])
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                if isinstance(data, dict):
+                    return data.get("plans", [])
+            except json.JSONDecodeError:
+                pass
+    return []
+
+
+def _plan_and_choose(rt, task: str) -> str | None:
+    """生成方案让用户选。返回选中方案的描述文本（供注入上下文）。
+
+    用户取消（q / Ctrl+C）时返回 None。
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from agent.core import _build_compaction_llm
+
+    console.print()
+    with console.status(
+        "[cyan]分析任务，生成实现策略…[/cyan]",
+        spinner="dots",
+        spinner_style="cyan",
+    ):
+        try:
+            llm = _build_compaction_llm(rt.config)
+            resp = llm.invoke([
+                SystemMessage(content=_PLANNER_SYSTEM),
+                HumanMessage(content=f"用户任务：{task}"),
+            ])
+            raw = _extract_content_from_resp(resp)
+        except Exception as e:
+            console.print(f"[yellow]规划失败：{e}，直接执行[/yellow]")
+            return None
+
+    plans = _parse_plans(raw)
+
+    if not plans:
+        console.print("[dim]未能解析出方案，直接执行[/dim]")
+        return None
+
+    t = Table(show_header=False, box=None, padding=(0, 2), expand=False)
+    t.add_column("#", style="bold cyan", width=3, no_wrap=True)
+    t.add_column("方案", style="bold white", width=12, no_wrap=True)
+    t.add_column("说明与权衡", style="white")
+
+    for i, p in enumerate(plans, 1):
+        name = p.get("name", f"方案 {i}")
+        desc = p.get("desc", "")
+        pros = p.get("pros", "")
+        cons = p.get("cons", "")
+
+        detail_lines = [desc] if desc else []
+        if pros:
+            detail_lines.append(f"[green]✓[/green] {pros}")
+        if cons:
+            detail_lines.append(f"[red]✗[/red] {cons}")
+
+        t.add_row(str(i), name, "\n".join(detail_lines))
+
+    console.print()
+    console.print(Panel(
+        t,
+        title="[bold bright_cyan]请选择实现策略[/bold bright_cyan]",
+        border_style="bright_cyan",
+        expand=False,
+    ))
+    console.print(
+        f"[dim]输入 [bold cyan]1[/bold cyan]-[bold cyan]{len(plans)}[/bold cyan] 选择，"
+        f"[bold cyan]q[/bold cyan] 取消[/dim]"
+    )
+
+    while True:
+        try:
+            ans = input("\n你的选择 > ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[yellow]已取消[/yellow]")
+            return None
+
+        if ans in ("q", "quit", "exit", "取消"):
+            console.print("[dim]已取消[/dim]")
+            return None
+
+        if ans.isdigit():
+            idx = int(ans)
+            if 1 <= idx <= len(plans):
+                picked = plans[idx - 1]
+                name = picked.get("name", "")
+                desc = picked.get("desc", "")
+                console.print(
+                    f"\n[green]✓ 已选择 [{idx}] {name}[/green]"
+                )
+                console.print()
+
+                return (
+                    f"【用户已选择方案 [{idx}] {name}】\n"
+                    f"实现思路：{desc}\n"
+                    f"请严格按此方案执行，不要再调用 propose_plan。"
+                )
+
+        console.print(
+            f"[red]请输入 1-{len(plans)} 之间的数字，或 q 取消[/red]"
+        )
+
+
+# ============================================================
+# 轨迹文件轮换
 # ============================================================
 
 
 def _rotate_trajectory(rt, thread_id: str) -> None:
-    """轮换到新轨迹文件。
-
-    调用时机：每次任务开始前。
-    效果：本次任务的所有事件进独立文件 session-{thread_id}-{timestamp}.jsonl
-    """
     tw = getattr(rt, "trajectory_writer", None)
     if tw is None:
         return
@@ -190,11 +426,11 @@ def _build_welcome_banner():
 
 
 def _build_welcome_info(project_path, rt, thread_id: str | None = None):
-    from rich.table import Table
+    from rich.table import Table as _Table
 
     cfg = rt.config
 
-    info = Table(
+    info = _Table(
         show_header=False,
         show_edge=False,
         box=None,
@@ -228,6 +464,8 @@ def _build_welcome_info(project_path, rt, thread_id: str | None = None):
         "记忆",
         f"[white]{mem.get('backend', '?')}[/white] [dim]({mem.get('type', '?')})[/dim]",
     )
+
+    info.add_row("👤", "用户", f"[dim]{current_user_id()}[/dim]")
 
     if is_enabled():
         info.add_row("🔍", "追踪", f"[green]{status_text()}[/green]")
@@ -272,30 +510,54 @@ def print_welcome(project_path: Path, rt, thread_id: str | None = None) -> None:
 # ============================================================
 
 
-def print_help() -> None:
-    console.print(
-        Panel(
-            "[bold]可用命令[/bold]\n"
-            "  /exit         退出\n"
-            "  /help         显示帮助\n"
-            "  /clear        清空当前会话状态\n"
-            "  /skills       列出所有技能\n"
-            "  /config       显示当前配置\n"
-            "  /metrics      显示本次会话指标\n"
-            "  /trace        查看最近的调用指标\n"
-            "  /thinking     查看最近一次任务的思考过程\n"
-            "  /cards        查看用户卡片（第 1 层记忆）\n"
-            "  /recall <q>   检索历史会话（第 2 层记忆）\n"
-            "  /memory       查看记忆后端状态\n"
-            "  /learn        从历史轨迹提炼工程经验\n"
-            "  /evolve       分析最近经验生成进化提案（--n N --apply）\n"
-            "  /stats        查看系统运行统计（任务成功率、工具使用、成本）\n"
-            "  /eval         回归测试集（mine/list/run）\n"
-            "  /<skill-name> 加载 user-invoked 技能\n"
-            "  其他输入       作为任务发送给 Agent",
-            title="Help",
-        )
+def print_help(show_all: bool = False) -> None:
+    t = Table(
+        show_header=False,
+        box=None,
+        padding=(0, 2),
+        expand=False,
     )
+    t.add_column("cmd", style="bold cyan", width=18, no_wrap=True)
+    t.add_column("desc", style="white", width=22, no_wrap=True)
+    t.add_column("cmd2", style="bold cyan", width=18, no_wrap=True)
+    t.add_column("desc2", style="white", width=22, no_wrap=True)
+
+    t.add_row("[bold yellow]核心[/bold yellow]", "", "", "")
+    t.add_row("/exit  (q)", "退出", "/help  (h, ?)", "显示帮助")
+    t.add_row("/clear", "清空会话状态", "", "")
+
+    t.add_row("", "", "", "")
+
+    t.add_row("[bold yellow]查看[/bold yellow]", "", "", "")
+    t.add_row("/stats  (s)", "运行统计", "/thinking  (t)", "上次思考")
+    t.add_row("/config  (c)", "当前配置", "/skills  (k)", "技能列表")
+    t.add_row("/memory  (m)", "记忆状态", "/cards", "用户卡片")
+    t.add_row("/users  (u)", "多用户审计", "/recall <q>  (r)", "检索历史")
+
+    t.add_row("", "", "", "")
+
+    if show_all:
+        t.add_row("[bold yellow]高级[/bold yellow]", "", "", "")
+        t.add_row("/eval  (e)", "回归测试", "/metrics", "（等同 /stats）")
+        t.add_row("/trace", "（等同 /stats）", "", "")
+        t.add_row("", "", "", "")
+
+    t.add_row("[bold yellow]技能[/bold yellow]", "", "", "")
+    t.add_row("/<name>", "加载 user-invoked 技能", "", "")
+
+    if not show_all:
+        t.add_row("", "", "", "")
+        t.add_row(
+            "[dim]输入 [/dim][bold]/help --all[/bold][dim] 查看全部命令[/dim]",
+            "", "", "",
+        )
+
+    console.print(Panel(t, title="Help", border_style="dim", expand=False))
+
+
+# ============================================================
+# 查看类命令
+# ============================================================
 
 
 def list_skills(rt) -> None:
@@ -350,6 +612,72 @@ def show_metrics(rt) -> None:
 
 def show_trace(display: MetricsDisplay) -> None:
     display.dump_recent(30)
+
+
+# ============================================================
+# ★ 多用户隔离审计
+# ============================================================
+
+
+def _show_users_audit() -> None:
+    """列出所有 user_id 及其数据量（用于隔离自查）。"""
+    try:
+        from memory.store import current_user_id as _cur_uid
+        from memory.store import get_store
+
+        store = get_store()
+        cur = _cur_uid()
+
+        try:
+            namespaces = store.list_namespaces()
+        except Exception as e:
+            console.print(f"[red]无法列出 namespace: {e}[/red]")
+            return
+
+        user_stats: dict[str, dict[str, int]] = {}
+        for ns in namespaces:
+            if len(ns) < 3 or ns[0] != "users":
+                continue
+            uid = ns[1]
+            kind = ns[2] if len(ns) > 2 else "?"
+            user_stats.setdefault(uid, {"cards": 0, "summaries": 0, "other": 0})
+            try:
+                items = store.search(ns, limit=100000)
+                n = len(items)
+            except Exception:
+                n = 0
+            if kind == "cards":
+                user_stats[uid]["cards"] += n
+            elif kind == "summaries":
+                user_stats[uid]["summaries"] += n
+            else:
+                user_stats[uid]["other"] += n
+
+        if not user_stats:
+            console.print("[dim]暂无任何用户数据[/dim]")
+            return
+
+        t = Table(show_header=True, box=None)
+        t.add_column("user_id", style="cyan")
+        t.add_column("cards", justify="right")
+        t.add_column("summaries", justify="right")
+        t.add_column("other", justify="right")
+        t.add_column("", justify="left")
+
+        for uid in sorted(user_stats.keys()):
+            s = user_stats[uid]
+            marker = "← 当前" if uid == cur else ""
+            t.add_row(
+                uid,
+                str(s["cards"]),
+                str(s["summaries"]),
+                str(s["other"]),
+                marker,
+            )
+
+        console.print(Panel(t, title="用户隔离审计", border_style="cyan"))
+    except Exception as e:
+        console.print(f"[red]/users 失败: {e}[/red]")
 
 
 # ============================================================
@@ -662,8 +990,6 @@ def process_pending_on_startup(rt, current_thread_id: str) -> None:
         if not to_process:
             return
 
-        console.print(f"[dim]发现 {len(to_process)} 个待提炼会话，后台补跑…[/dim]")
-
         def _run():
             for task in to_process:
                 try:
@@ -682,47 +1008,48 @@ def process_pending_on_startup(rt, current_thread_id: str) -> None:
 
 
 # ============================================================
-# /learn 命令
+# 第 3 步：摘要聚合
 # ============================================================
 
 
-def learn_from_trajectories(rt) -> None:
-    try:
-        from memory.lesson_extractor import (
-            extract_lessons_from_trajectories,
-            merge_into_lessons,
-        )
-    except ImportError:
-        console.print("[yellow]lesson_extractor 未安装，跳过[/yellow]")
+def process_summary_aggregation_on_startup(rt) -> None:
+    """启动时检查是否要聚合旧摘要（后台静默跑）。
+
+    触发条件：未聚合 raw 摘要数 >= AGENT_AGGREGATE_THRESHOLD（默认 20）。
+    """
+    if not _env_bool("AGENT_AUTO_AGGREGATE", "true"):
         return
 
-    traj_dir = rt.config.trajectory_dir
-    from agent.core import _build_compaction_llm
+    threshold = _env_int("AGENT_AGGREGATE_THRESHOLD", 20)
 
-    llm = _build_compaction_llm(rt.config)
+    def _run():
+        try:
+            from agent.core import _build_compaction_llm
+            from memory.session_summary import session_summary_repo
+            from memory.summary_aggregator import aggregate_summaries
 
-    console.print("[dim]正在分析最近的成功轨迹…[/dim]")
-    extracted = extract_lessons_from_trajectories(llm, traj_dir)
+            repo = session_summary_repo()
+            raw_items = repo.find_unaggregated_raw()
+            if len(raw_items) < threshold:
+                return
 
-    if not extracted:
-        console.print("[dim]未找到可提炼的成功轨迹[/dim]")
-        return
+            llm = _build_compaction_llm(rt.config)
+            result = aggregate_summaries(llm, repo, threshold=threshold)
+            if result.get("created", 0) > 0:
+                log.info("summary_aggregated", **result)
+        except Exception as e:
+            log.warning("summary_aggregation_failed", error=str(e))
 
-    merge_into_lessons(rt.config.meta_dir, extracted)
-    console.print(f"[dim]工程经验已更新: {rt.config.meta_dir / 'memory' / 'lessons.md'}[/dim]")
+    t = threading.Thread(target=_run, daemon=True, name="summary-aggregate")
+    t.start()
 
 
 # ============================================================
-# P2: 经验归档
+# 经验归档
 # ============================================================
 
 
 def _archive_experience(rt, thread_id: str, task: str) -> None:
-    """任务结束后归档经验到进化库。
-
-    ★ P4-3: 直接用 rt.trajectory_writer.path（rotate 后文件是唯一的），
-            并调用 flush_now() 确保所有事件落盘。
-    """
     try:
         import json as _json
         import time as _time
@@ -739,7 +1066,6 @@ def _archive_experience(rt, thread_id: str, task: str) -> None:
         if not traj_path.exists():
             return
 
-        # ★ P4-3: 确保所有事件已落盘（rotate 之后这个文件是本任务专属的）
         try:
             tw.flush_now(timeout=2.0)
         except Exception:
@@ -804,6 +1130,109 @@ def _archive_experience(rt, thread_id: str, task: str) -> None:
         log.info("experience_archived", session_id=thread_id, verdict=record.verdict)
     except Exception as e:
         log.warning("experience_archive_failed", error=str(e))
+
+
+# ============================================================
+# 自动进化
+# ============================================================
+
+_AUTO_EVOLVE_COUNTER = "auto-evolve-counter.txt"
+
+
+def _auto_evolve_silent(rt) -> None:
+    try:
+        from agent.core import _build_compaction_llm
+        from agent.evolution.aggregator import ExperienceAggregator
+        from agent.evolution.runner import _render_proposal
+        from agent.evolution.store import get_store
+
+        store = get_store()
+        window = _env_int("AGENT_AUTO_EVOLVE_WINDOW", 30)
+        records = store.load_recent(n=window)
+        if not records:
+            return
+
+        llm = _build_compaction_llm(rt.config)
+        aggregator = ExperienceAggregator(llm)
+        result = aggregator.aggregate(records, existing_rules="")
+
+        if "error" in result:
+            log.warning("auto_evolve_aggregator_error", error=result["error"])
+            return
+
+        stats = ExperienceAggregator._statistical_summary(records)
+        proposal_md = _render_proposal(result, records, stats)
+        path = store.save_proposal(proposal_md)
+        log.info("auto_evolve_proposal_saved", path=str(path))
+
+        if _env_bool("AGENT_AUTO_EVOLVE_APPLY", "false"):
+            _apply_high_global_rules(rt, result)
+    except Exception as e:
+        log.warning("auto_evolve_failed", error=str(e))
+
+
+def _apply_high_global_rules(rt, result: dict) -> None:
+    try:
+        rules = [
+            r
+            for r in result.get("candidate_rules", [])
+            if r.get("priority") == "high" and r.get("scope") == "global"
+        ]
+        if not rules:
+            return
+
+        prompt_path = rt.config.agent_home / "prompts" / "system_v1.md"
+        if not prompt_path.exists():
+            return
+
+        original = prompt_path.read_text(encoding="utf-8")
+        appended = original + "\n\n## 从经验中提炼的规则\n"
+        for r in rules:
+            appended += f"\n- {r.get('rule', '')}"
+
+        backup = prompt_path.with_suffix(".md.bak")
+        backup.write_text(original, encoding="utf-8")
+        prompt_path.write_text(appended, encoding="utf-8")
+        log.info("auto_evolve_applied", count=len(rules), backup=str(backup))
+    except Exception as e:
+        log.warning("auto_evolve_apply_failed", error=str(e))
+
+
+def _maybe_auto_evolve(rt) -> None:
+    if not _env_bool("AGENT_AUTO_EVOLVE", "true"):
+        return
+
+    threshold = _env_int("AGENT_AUTO_EVOLVE_THRESHOLD", 10)
+    counter_path = rt.config.meta_dir / _AUTO_EVOLVE_COUNTER
+
+    try:
+        count = int(counter_path.read_text().strip()) if counter_path.exists() else 0
+    except Exception:
+        count = 0
+
+    count += 1
+
+    if count < threshold:
+        try:
+            counter_path.parent.mkdir(parents=True, exist_ok=True)
+            counter_path.write_text(str(count), encoding="utf-8")
+        except Exception:
+            pass
+        return
+
+    try:
+        counter_path.write_text("0", encoding="utf-8")
+    except Exception:
+        pass
+
+    def _run():
+        try:
+            _auto_evolve_silent(rt)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_run, daemon=True, name="auto-evolve")
+    t.start()
 
 
 # ============================================================
@@ -905,6 +1334,7 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
     tool_events: list[str] = []
     tool_seen: set[str] = set()
     _last_update = [0.0]
+    _t0 = [time.time()]
 
     TOOL_DISPLAY_MAX = 6
 
@@ -929,7 +1359,8 @@ def stream_task_with_reasoning(rt, task: str, thread_id: str) -> str:
             for line in tool_events[-TOOL_DISPLAY_MAX:]:
                 t.append(line + "\n", style="cyan")
             t.append("\n")
-        t.append("💭 思考中…", style="dim italic")
+        elapsed = time.time() - _t0[0]
+        t.append(f"💭 思考中… ({elapsed:.1f}s)", style="dim italic")
         return t
 
     use_live = console.is_terminal
@@ -1034,8 +1465,14 @@ def _print_final(content: str, rt, thread_id: str, turns_count: int) -> None:
 def run_single_task(rt, task: str, thread_id: str, display: MetricsDisplay) -> None:
     console.print(f"[bold green]任务:[/bold green] {task}\n")
 
-    # ★ P4-3: 每次任务独立轨迹文件
     _rotate_trajectory(rt, thread_id)
+
+    # 复杂任务先规划再执行
+    if _is_complex_task(task):
+        choice_context = _plan_and_choose(rt, task)
+        if choice_context is None:
+            return  # 用户取消
+        task = f"{task}\n\n{choice_context}"
 
     try:
         content = stream_task_with_reasoning(rt, task, thread_id)
@@ -1059,8 +1496,8 @@ def run_single_task(rt, task: str, thread_id: str, display: MetricsDisplay) -> N
 
         _print_final(content, rt, thread_id, turns_count)
 
-        # P2: 归档经验
         _archive_experience(rt, thread_id, task)
+        _maybe_auto_evolve(rt)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]已中断[/yellow]")
@@ -1114,12 +1551,19 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 
         lower_input = user_input.lower()
 
+        if lower_input in _ALIASES:
+            user_input = _ALIASES[lower_input]
+            lower_input = user_input.lower()
+
         if lower_input in ("/exit", "/quit", "exit", "quit"):
             console.print("[dim]再见[/dim]")
             break
-        if lower_input in ("/help", "help"):
-            print_help()
+
+        if lower_input.startswith("/help"):
+            show_all = "--all" in user_input.lower()
+            print_help(show_all=show_all)
             continue
+
         if lower_input in ("/clear", "clear"):
             rt.status_bar.reset()
             console.print("[dim]会话状态已清空[/dim]")
@@ -1131,7 +1575,13 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
             show_config(rt)
             continue
         if lower_input in ("/metrics", "metrics"):
-            show_metrics(rt)
+            try:
+                from agent.stats import collect, render_stats
+
+                snap = collect(rt.config.meta_dir)
+                render_stats(snap, console)
+            except Exception as e:
+                console.print(f"[red]/metrics 失败: {e}[/red]")
             continue
         if lower_input == "/trace":
             show_trace(display)
@@ -1145,41 +1595,10 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
         if lower_input == "/memory":
             show_memory_status()
             continue
-        if lower_input == "/learn":
-            learn_from_trajectories(rt)
+        if lower_input == "/users":
+            _show_users_audit()
             continue
 
-        # P2: /evolve 命令
-        if lower_input.startswith("/evolve"):
-            parts = user_input[len("/evolve") :].strip().split()
-            n = 20
-            apply_flag = False
-            i = 0
-            while i < len(parts):
-                p = parts[i]
-                if p == "--apply":
-                    apply_flag = True
-                elif p == "--n" and i + 1 < len(parts):
-                    try:
-                        n = int(parts[i + 1])
-                    except ValueError:
-                        pass
-                    i += 1
-                elif p.startswith("--n="):
-                    try:
-                        n = int(p.split("=", 1)[1])
-                    except ValueError:
-                        pass
-                i += 1
-            try:
-                from agent.evolution import run_evolve
-
-                run_evolve(rt, n=n, apply=apply_flag)
-            except Exception as e:
-                console.print(f"[red]/evolve 失败: {e}[/red]")
-            continue
-
-        # P4-1: /stats 命令
         if lower_input == "/stats":
             try:
                 from agent.stats import collect, render_stats
@@ -1190,7 +1609,6 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                 console.print(f"[red]/stats 失败: {e}[/red]")
             continue
 
-        # P4-2: /eval 命令
         if lower_input.startswith("/eval"):
             parts = user_input[len("/eval") :].strip().split()
             subcmd = parts[0] if parts else "help"
@@ -1227,9 +1645,7 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                     if not cases:
                         console.print("[dim]案例库为空。先跑 /eval mine[/dim]")
                     else:
-                        from rich.table import Table as _T
-
-                        t = _T(show_header=True, box=None)
+                        t = Table(show_header=True, box=None)
                         t.add_column("case_id", style="dim")
                         t.add_column("category")
                         t.add_column("expected")
@@ -1312,13 +1728,19 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
                 continue
             task_text = handled
 
+        # 复杂任务先规划再执行
+        if _is_complex_task(task_text):
+            choice_context = _plan_and_choose(rt, task_text)
+            if choice_context is None:
+                continue  # 用户取消，回到 prompt
+            task_text = f"{task_text}\n\n{choice_context}"
+
         bind_context(
             session_id=rt.config.project_path.name,
             thread_id=thread_id,
             trace_id=get_trace_id(),
         )
 
-        # ★ P4-3: 每次任务独立轨迹文件
         _rotate_trajectory(rt, thread_id)
 
         try:
@@ -1344,8 +1766,8 @@ def run_interactive(rt, thread_id: str, display: MetricsDisplay) -> None:
 
             _print_final(content, rt, thread_id, turns_count)
 
-            # P2: 归档经验
             _archive_experience(rt, thread_id, task_text)
+            _maybe_auto_evolve(rt)
 
         except KeyboardInterrupt:
             console.print("\n[yellow]已中断[/yellow]")
@@ -1443,6 +1865,12 @@ def main() -> int:
 
     try:
         process_pending_on_startup(rt, thread_id)
+    except Exception:
+        pass
+
+    # 第 3 步：启动时检查摘要聚合
+    try:
+        process_summary_aggregation_on_startup(rt)
     except Exception:
         pass
 

@@ -5,13 +5,9 @@
     AGENT_RETRIEVER=chroma   → ChromaDB 语义检索
     AGENT_RETRIEVER=hybrid   → 两路并跑 + RRF 融合（推荐）
 
-延迟加载：
-- ChromaRetriever 初始化时不加载嵌入模型、不创建 collection
-- 第一次真正 search 或 index 时才加载
-- 避免启动时多等 2-5 秒
-
-RRF (Reciprocal Rank Fusion)：
-    score(doc) = Σ 1 / (k + rank_in_list)
+第 4 步（2026-10-07）：
+    - BM25 从 load_searchable() 加载（排除已聚合的 raw）
+    - 减少检索噪声，只返回 daily + 未聚合 raw
 """
 
 from __future__ import annotations
@@ -107,8 +103,9 @@ class BM25Retriever(Retriever):
         uid = user_id or self.user_id
         repo = session_summary_repo(user_id=uid)
 
+        # ★ 第 4 步：只加载可检索的摘要（排除已聚合的 raw）
         try:
-            all_summaries = repo.load_all()
+            all_summaries = repo.load_searchable()
         except Exception:
             return []
 
@@ -174,16 +171,7 @@ class BM25Retriever(Retriever):
 
 
 class ChromaRetriever(Retriever):
-    """基于 ChromaDB 的语义检索器（延迟加载）。
-
-    初始化时：
-    - 只保存配置，不加载嵌入模型、不连 ChromaDB、不同步索引
-
-    第一次访问 collection 时：
-    - 加载 sentence-transformers 模型（2-5 秒）
-    - 连接 ChromaDB
-    - 同步 Store 数据
-    """
+    """基于 ChromaDB 的语义检索器（延迟加载）。"""
 
     def __init__(
         self,
@@ -203,16 +191,12 @@ class ChromaRetriever(Retriever):
             "AGENT_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"
         )
 
-        # 延迟初始化
         self._client = None
         self._collection = None
         self._embed_fn = None
         self._init_error: str = ""
 
-    # ---------- 延迟加载 ----------
-
     def _ensure_initialized(self) -> bool:
-        """确保 collection 已就绪。返回是否成功。"""
         if self._collection is not None:
             return True
         if self._init_error:
@@ -228,7 +212,6 @@ class ChromaRetriever(Retriever):
         try:
             self.persist_dir.mkdir(parents=True, exist_ok=True)
 
-            # 嵌入函数
             embed_fn = None
             if os.getenv("AGENT_EMBEDDING_PROVIDER", "").lower() == "openai":
                 try:
@@ -250,7 +233,6 @@ class ChromaRetriever(Retriever):
 
             self._embed_fn = embed_fn
 
-            # Chroma client
             self._client = chromadb.PersistentClient(path=str(self.persist_dir))
             self._collection = self._client.get_or_create_collection(
                 name=f"summaries_{self.user_id}",
@@ -258,7 +240,6 @@ class ChromaRetriever(Retriever):
                 embedding_function=embed_fn,
             )
 
-            # 首次同步
             self._sync_from_store()
             return True
 
@@ -299,6 +280,7 @@ class ChromaRetriever(Retriever):
                     "session_id": s.session_id,
                     "task_type": s.task_type,
                     "timestamp": s.timestamp,
+                    "level": s.level,
                 }
             )
 
@@ -315,16 +297,12 @@ class ChromaRetriever(Retriever):
             except Exception:
                 continue
 
-    # ---------- 属性访问 ----------
-
     @property
     def collection(self):
-        """访问时触发初始化。"""
         self._ensure_initialized()
         return self._collection
 
     def count(self) -> int:
-        """向量数量。未初始化则触发。"""
         self._ensure_initialized()
         if self._collection is None:
             return 0
@@ -332,8 +310,6 @@ class ChromaRetriever(Retriever):
             return self._collection.count()
         except Exception:
             return 0
-
-    # ---------- 索引 / 检索 ----------
 
     def index(self, item: SessionSummary) -> None:
         if not self._ensure_initialized():
@@ -348,6 +324,7 @@ class ChromaRetriever(Retriever):
                         "session_id": item.session_id,
                         "task_type": item.task_type,
                         "timestamp": item.timestamp,
+                        "level": item.level,
                     }
                 ],
             )
@@ -376,10 +353,13 @@ class ChromaRetriever(Retriever):
             except Exception:
                 return []
 
+        # ★ 多取一些候选，方便过滤
+        n_fetch = max(top_k * 3, 10)
+
         try:
             results = collection.query(
                 query_texts=[query],
-                n_results=top_k,
+                n_results=n_fetch,
             )
         except Exception:
             return []
@@ -387,8 +367,17 @@ class ChromaRetriever(Retriever):
         if not results or not results.get("ids"):
             return []
 
+        # ★ 第 4 步：过滤掉已聚合的 raw
+        # 通过 session_id 在 store 反查不太现实，改用查询时 metadata 携带的 level
+        # 但 aggregated_into 没在 metadata 里——所以这里只过滤 level=raw 且已经被聚合的情况
+        # 简化方案：只把 daily 优先，raw 让上层决定
+        repo = session_summary_repo(user_id=uid)
+        searchable_ids = {s.id for s in repo.load_searchable()}
+
         items: list[RetrievedItem] = []
-        for i, _doc_id in enumerate(results["ids"][0]):
+        for i, doc_id in enumerate(results["ids"][0]):
+            if doc_id not in searchable_ids:
+                continue
             meta = results["metadatas"][0][i] if results.get("metadatas") else {}
             distance = results["distances"][0][i] if results.get("distances") else 1.0
             score = 1.0 - distance
@@ -404,10 +393,11 @@ class ChromaRetriever(Retriever):
                     source="vector",
                 )
             )
+            if len(items) >= top_k:
+                break
         return items
 
     def reset(self) -> None:
-        """清空 collection（调试）。"""
         if not self._ensure_initialized():
             return
         try:
@@ -426,10 +416,7 @@ class ChromaRetriever(Retriever):
 
 
 class HybridRetriever(Retriever):
-    """混合检索：向量 + 关键词，用 RRF 融合。
-
-    延迟加载：Chroma 部分第一次检索时才真正初始化。
-    """
+    """混合检索：向量 + 关键词，用 RRF 融合。"""
 
     def __init__(
         self,
@@ -443,7 +430,6 @@ class HybridRetriever(Retriever):
 
         self.bm25 = BM25Retriever(user_id=user_id)
 
-        # ChromaRetriever 构造不再触发模型加载
         try:
             self.chroma: ChromaRetriever | None = ChromaRetriever(user_id=user_id)
         except Exception:
@@ -451,10 +437,8 @@ class HybridRetriever(Retriever):
 
     @property
     def is_hybrid(self) -> bool:
-        """是否两路都在跑。"""
         if self.chroma is None:
             return False
-        # 探测一次
         return self.chroma._ensure_initialized()
 
     def index(self, item: SessionSummary) -> None:
@@ -574,9 +558,6 @@ def get_retriever(user_id: str = "default") -> Retriever:
     - AGENT_RETRIEVER=bm25（默认）  → 纯关键词
     - AGENT_RETRIEVER=chroma       → 纯语义
     - AGENT_RETRIEVER=hybrid       → 混合
-
-    注意：Chroma/Hybrid 的构造不再触发模型加载，
-    只有第一次 search/index 时才会真正初始化。
     """
     kind = os.getenv("AGENT_RETRIEVER", "bm25").lower()
     cache_key = f"{kind}:{user_id}"

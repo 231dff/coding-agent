@@ -9,6 +9,10 @@
 - 一个项目一个 DB 文件，进程内多会话共享
 - thread_id 即会话 ID（CLI 默认按项目路径生成）
 - WAL 模式 + 30s 超时，兼容多进程访问
+
+修复记录：
+  - 2026-10-06：python sqlite3 默认隐式事务 + LangGraph 显式 BEGIN 冲突
+    → 连接时设 isolation_level=None
 """
 
 from __future__ import annotations
@@ -31,15 +35,19 @@ def build_checkpointer(meta_dir: Path) -> SqliteSaver:
     db_path = meta_dir / "sessions" / "checkpoints.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # ★ isolation_level=None：autocommit 模式
+    #   让 LangGraph 完全接管 BEGIN/COMMIT/ROLLBACK
     conn = sqlite3.connect(
         str(db_path),
         check_same_thread=False,
         timeout=30.0,
+        isolation_level=None,
     )
     # WAL 模式：读写不互斥，兼容多进程
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=30000")
     except sqlite3.DatabaseError:
         pass
 

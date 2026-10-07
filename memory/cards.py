@@ -1,15 +1,22 @@
 """Advanced JSON Cards：第 1 层记忆。
 
-数据模型：Card 数据类（8 字段）
+数据模型：Card 数据类
 存储：基于 LangGraph Store 的 CardRepository
 
 命名空间约定：
     ("users", user_id, "cards", "active")   当前有效卡片
     ("users", user_id, "cards", "history")  历史版本（supersedes 链）
+
+淘汰策略（2026-10-06 新增）：
+    - 时间衰减：越新的卡片权重越高（90 天衰减到一半）
+    - 命中加权：被注入 system prompt 次数越多越重要
+    - 复合分数：confidence * recency + hit_boost
+    - 超 max_cards 时按分数取前 N
 """
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -21,6 +28,11 @@ from memory.store import current_user_id, get_store
 
 CardType = Literal["preference", "fact", "procedure", "constraint", "deleted"]
 CardScope = Literal["user", "project", "knowledge"]
+
+# 时间衰减半衰期（天）
+_TTL_HALFLIFE_DAYS = 90
+# 命中加权的上限系数
+_HIT_BOOST_WEIGHT = 0.3
 
 
 @dataclass
@@ -46,6 +58,10 @@ class Card:
     version: int = 1
     supersedes: str | None = None
 
+    # ★ 新增字段：用于 LRU + TTL 淘汰
+    last_hit_at: float = 0.0   # 上次被注入 system prompt 的时间
+    hit_count: int = 0         # 累计被注入次数
+
     def __post_init__(self):
         if not self.id:
             self.id = f"card-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
@@ -59,11 +75,32 @@ class Card:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Card":
+        """向后兼容：旧数据缺 last_hit_at / hit_count 时用默认值。"""
         allowed = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in data.items() if k in allowed})
 
     def to_prompt_line(self) -> str:
         return f"- [{self.category}] {self.fact}"
+
+    # ★ 新增：复合优先级分数
+    def priority_score(self, now: float | None = None) -> float:
+        """越可能有用 → 分数越高。
+
+        组成：
+          1. confidence 基础分（0-1）
+          2. 时间衰减：90 天前的卡片衰减到一半
+          3. 命中加权：被用过越多越重要（log 压缩防爆）
+        """
+        if now is None:
+            now = time.time()
+
+        age_days = max(0.0, (now - self.created_at) / 86400)
+        recency = 0.5 ** (age_days / _TTL_HALFLIFE_DAYS)
+
+        # hit_boost 在 0~1 之间（log(1+N)/3 大概：N=0→0，N=20→1）
+        hit_boost = math.log(1 + max(0, self.hit_count)) / 3.0
+
+        return self.confidence * recency + hit_boost * _HIT_BOOST_WEIGHT
 
 
 # ============================================================
@@ -178,21 +215,13 @@ class CardRepository:
             confidence=overrides.get("confidence", old.confidence),
             version=old.version + 1,
             supersedes=old_id,
+            # ★ 保留命中历史
+            last_hit_at=old.last_hit_at,
+            hit_count=old.hit_count,
         )
 
-        # 新版本入 active
-        self.store.put(
-            self._ns_active(),
-            new.id,
-            new.to_dict(),
-        )
-        # 旧版本挪到 history
-        self.store.put(
-            self._ns_history(),
-            old.id,
-            old.to_dict(),
-        )
-        # 从 active 删掉旧的
+        self.store.put(self._ns_active(), new.id, new.to_dict())
+        self.store.put(self._ns_history(), old.id, old.to_dict())
         try:
             self.store.delete(self._ns_active(), old_id)
         except Exception:
@@ -219,6 +248,32 @@ class CardRepository:
         except Exception:
             pass
         return tombstone
+
+    # ★ 新增：标记一组卡片被命中
+    def mark_hit(self, card_ids: list[str]) -> int:
+        """标记卡片被注入（更新 last_hit_at + hit_count）。
+
+        Returns:
+            成功标记的数量。
+        """
+        if not card_ids:
+            return 0
+        now = time.time()
+        updated = 0
+        ids_set = set(card_ids)
+
+        for card in self.load_active():
+            if card.id not in ids_set:
+                continue
+            card.last_hit_at = now
+            card.hit_count += 1
+            card.updated_at = now
+            try:
+                self.store.put(self._ns_active(), card.id, card.to_dict())
+                updated += 1
+            except Exception:
+                continue
+        return updated
 
     # ---------- 查询 ----------
 
@@ -256,30 +311,42 @@ class CardRepository:
         self,
         max_cards: int = 40,
         min_confidence: float = 0.5,
+        mark_hit: bool = False,
     ) -> str:
-        """渲染成 system prompt 片段。"""
-        cards = [c for c in self.load_active() if c.confidence >= min_confidence]
-        if not cards:
+        """渲染成 system prompt 片段。
+
+        Args:
+            max_cards: 最多渲染多少张卡片。
+            min_confidence: 低于此置信度的卡片不渲染。
+            mark_hit: True 时，把本次实际渲染的卡片标记为"被命中"。
+        """
+        candidates = [c for c in self.load_active() if c.confidence >= min_confidence]
+        if not candidates:
             return ""
 
-        groups: dict[str, list[Card]] = {}
-        for c in cards:
-            groups.setdefault(c.category, []).append(c)
-        for cat in groups:
-            groups[cat].sort(key=lambda c: c.confidence, reverse=True)
+        now = time.time()
 
-        total = 0
+        # ★ 按优先级分数排序（confidence × 时间衰减 + 命中加权）
+        candidates.sort(key=lambda c: c.priority_score(now), reverse=True)
+
+        picked = candidates[:max_cards]
+
+        # ★ 按 category 分组渲染（保持原有分组结构，便于阅读）
+        groups: dict[str, list[Card]] = {}
+        for c in picked:
+            groups.setdefault(c.category, []).append(c)
+
         lines: list[str] = []
-        for cat, items in groups.items():
-            if total >= max_cards:
-                break
+        for cat in sorted(groups.keys()):
             lines.append(f"## {cat}")
-            for c in items:
-                if total >= max_cards:
-                    break
+            for c in groups[cat]:
                 lines.append(c.to_prompt_line())
-                total += 1
             lines.append("")
+
+        # ★ 标记命中（可选）
+        if mark_hit:
+            self.mark_hit([c.id for c in picked])
+
         return "\n".join(lines).rstrip()
 
 

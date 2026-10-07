@@ -5,13 +5,18 @@
     所以把测试结果附加到原工具的返回文本里。
   - 首次触发时探测沙箱是否有测试基础设施（pytest + tests/ 目录），
     没有就静默跳过，避免污染轨迹。
+  - 探测结果通过 logging.debug 记录，默认静音。
 """
 
 from __future__ import annotations
 
+import logging
 import time
 
 from langchain.agents.middleware import AgentMiddleware
+
+# 模块级 logger：默认 WARNING 级，探测信息不会刷屏
+log = logging.getLogger("autotest")
 
 WRITE_TOOLS = {
     "write_file",
@@ -48,7 +53,7 @@ class AutoTestMiddleware(AgentMiddleware):
         self.probe_command = probe_command
         self._last_test_at: float = 0.0
         self._run_tests_tool = None
-        # ★ 探测结果缓存：None=未探测, True=有测试设施, False=没有
+        # 探测结果缓存：None=未探测, True=有测试设施, False=没有
         self._probe_result: bool | None = None
 
     def bind_run_tests_tool(self, tool) -> None:
@@ -72,11 +77,11 @@ class AutoTestMiddleware(AgentMiddleware):
         except Exception:
             self._probe_result = False
 
-        print(
-            f"[AUTOTEST] 探测测试设施: "
-            f"{'有' if self._probe_result else '无'} "
-            f"(cmd={self.probe_command[:60]}...)",
-            flush=True,
+        # ★ 静音：默认 WARNING 级不显示；LOG_LEVEL=DEBUG 可见
+        log.debug(
+            "probe_result=%s cmd=%s",
+            self._probe_result,
+            self.probe_command[:60],
         )
         return self._probe_result
 

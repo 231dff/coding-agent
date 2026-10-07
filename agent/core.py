@@ -15,15 +15,8 @@
 - P1-3: 结构化交付报告（generate_summary_report 工具）
 - P2: 持续进化闭环（经验归档 + /evolve 提案生成）
 - P3: 多 Agent 并行协作（管理者模式 + 级联终止）
-
-性能优化：
-- 沙箱启动与代码库分析并行执行
-- 检索器延迟初始化（不阻塞启动）
-
-安全：
-- 幂等性中间件防止重复写操作
-- 日志脱敏（见 observability/redact.py）
-- 沙箱 release 不做任何删除（见 sandbox/pool.py）
+- P4: Human-in-the-Loop 规划（propose_plan 工具）
+- ★ P4-4: 关键操作前用户确认（ConfirmMiddleware）
 """
 
 from __future__ import annotations
@@ -77,6 +70,9 @@ from middleware.circuit_breaker import (
     CircuitBreakerConfig,
     CircuitBreakerMiddleware,
 )
+
+# ★ P4-4: 关键操作前确认
+from middleware.confirm_middleware import create_confirm_middleware
 from middleware.content_stripper import create_content_stripper_middleware
 from middleware.context_compaction import (
     CompactionPipelineConfig,
@@ -103,6 +99,7 @@ from tools.context_ops import CONTEXT_TOOLS
 from tools.context_ops import bind as bind_context
 from tools.lint import validate_tools
 from tools.parallel_ops import PARALLEL_TOOLS
+from tools.planning_ops import PLANNING_TOOLS
 from tools.registry import build_default_tools
 
 # P1-3: 结构化交付报告
@@ -363,7 +360,6 @@ def _build_compaction_llm(cfg: AgentConfig):
     if not cheap_model:
         return build_llm(cfg)
 
-    # 浅拷贝 + 覆盖 model（不依赖 dataclasses，兼容 pydantic / 自定义类）
     import copy as _copy
 
     try:
@@ -751,6 +747,11 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
 
     tools += [_par.__dict__[n] for n in PARALLEL_TOOLS]
 
+    # ★ P4: Human-in-the-Loop 规划工具
+    from tools import planning_ops as _plan
+
+    tools += [_plan.__dict__[n] for n in PLANNING_TOOLS]
+
     tools.append(create_load_skill_tool(skill_registry))
 
     # ---------- 7.1 MCP 元工具（渐进式披露） ----------
@@ -805,7 +806,11 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
     if user_memory_enabled:
         try:
             max_cards = _env_int("AGENT_USER_MEMORY_MAX_CARDS", 40)
-            cards_text = user_card_repo().render_prompt(max_cards=max_cards)
+            # ★ mark_hit=True：把本次注入的卡片标记为"被命中"
+            cards_text = user_card_repo().render_prompt(
+                max_cards=max_cards,
+                mark_hit=True,
+            )
             if cards_text:
                 system_prompt = f"{system_prompt}\n\n## 用户记忆\n{cards_text}"
         except Exception as e:
@@ -916,6 +921,10 @@ def build_agent(cfg: AgentConfig) -> AgentRuntime:
         create_dependency_check_middleware(analyzer),
         circuit_breaker,
         *([] if eval_mode else [StatusBarMiddleware(status_bar)]),
+        # ★ P4-4: 关键操作前用户确认（在 auto_test 之前，先确认再执行）
+        create_confirm_middleware(
+            enabled=_env_bool("AGENT_CONFIRM", "on") and not eval_mode,
+        ),
         auto_test_mw,
         *([] if trajectory_mw is None else [trajectory_mw]),
         create_prompt_cache_middleware(
